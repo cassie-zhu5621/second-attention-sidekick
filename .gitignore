@@ -1,0 +1,17 @@
+# Dataset photos (captured at runtime — don't commit)
+dataset/
+*.jpg
+*.jpeg
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Arduino build output
+build/
+*.bin
