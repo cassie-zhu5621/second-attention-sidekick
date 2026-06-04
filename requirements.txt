@@ -1,0 +1,7 @@
+requests
+anthropic
+openai-whisper
+sounddevice
+numpy
+pillow
+pyserial

@@ -1,0 +1,56 @@
+[
+  {
+    "id": "aesthetic",
+    "name": "Aesthetic",
+    "text": "How aesthetically pleasing is this image? 0 = ordinary or unpleasant. 1 = strikingly beautiful composition and color.",
+    "n_scored": 0
+  },
+  {
+    "id": "conflict",
+    "name": "Conflict",
+    "text": "Semantic conflict between elements. 0 = harmonious, expected together. 1 = strongly discordant (e.g. a dog at a wedding ceremony).",
+    "n_scored": 0
+  },
+  {
+    "id": "tension",
+    "name": "Tension",
+    "text": "Tension, ambiguity, unresolved symbolism, or psychological charge that invites further looking. 0 = flat and fully explained. 1 = strongly charged or ambiguous.",
+    "n_scored": 0
+  },
+  {
+    "id": "story",
+    "name": "Story potential",
+    "text": "Story potential \u2014 does the image suggest something happened before, or is about to happen? 0 = static, non-narrative. 1 = strongly narrative.",
+    "n_scored": 0
+  },
+  {
+    "id": "novelty",
+    "name": "Novelty",
+    "text": "Novelty \u2014 how unusual is this scene relative to everyday images? 0 = entirely typical. 1 = highly unusual or rarely-seen.",
+    "n_scored": 0
+  },
+  {
+    "id": "color_harmony",
+    "name": "Color harmony",
+    "text": "Color harmony of the image. 0 = clashing or muddy colors. 1 = harmonious, well-chosen color relationships.",
+    "n_scored": 0
+  },
+  {
+    "id": "mystery",
+    "name": "Mystery",
+    "text": "Mystery \u2014 does the image conceal information or invite speculation? 0 = fully revealed. 1 = strongly enigmatic.",
+    "n_scored": 0
+  },
+  {
+    "id": "decisive_moment",
+    "name": "Decisive moment",
+    "text": "Decisive moment \u2014 is this a peak instant of action or emotion (Cartier-Bresson sense)? 0 = mundane non-moment. 1 = clearly a peak instant.",
+    "n_scored": 0
+  },
+  {
+    "id": "frame_within_frame",
+    "name": "Frame within frame",
+    "text": "Frame within a frame \u2014 does a doorway, window, mirror, or aperture inside the image frame its subject? 0 = no internal frame. 1 = a clear frame-within-frame composition.",
+    "n_scored": 0
+  }
+]

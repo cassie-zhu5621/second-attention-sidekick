@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VLM score one — Interestingness Composer (P1D1 dev tool)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel-2: #1f232c;
+    --ink: #e8eaef;
+    --muted: #9aa3b2;
+    --accent: #6ea8ff;
+    --good: #8be38b;
+    --warn: #ffb86b;
+    --bad: #ff7a7a;
+    --line: #2a2f3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    min-height: 100vh;
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 13px; }
+  .sub code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    max-width: 1100px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .panel h2 {
+    margin: 0 0 12px; font-size: 13px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  /* Drop zone */
+  #drop {
+    border: 1.5px dashed var(--line);
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  #drop.over { border-color: var(--accent); background: rgba(110,168,255,0.06); }
+  #drop input { display: none; }
+  #preview {
+    max-width: 100%; max-height: 360px;
+    border-radius: 6px; margin-top: 12px;
+    display: none;
+  }
+  #fileinfo { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  /* Prompt area */
+  textarea {
+    width: 100%; min-height: 110px; resize: vertical;
+    background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; font: inherit;
+  }
+  textarea:focus { outline: 1px solid var(--accent); }
+
+  .chips { margin: 10px 0 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  button.primary {
+    background: var(--accent); color: #001431; border: 0;
+    border-radius: 6px; padding: 10px 18px; font-weight: 600;
+    cursor: pointer; font-size: 14px;
+  }
+  button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Score display */
+  #scorebox {
+    margin-top: 14px;
+    padding: 18px;
+    background: var(--panel-2);
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    display: none;
+  }
+  #scorebox.show { display: block; }
+  .score-num {
+    font-size: 64px; font-weight: 600; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .score-bar {
+    margin-top: 12px; height: 8px;
+    background: var(--bg); border-radius: 4px; overflow: hidden;
+  }
+  .score-bar-fill {
+    height: 100%; background: linear-gradient(90deg, var(--good), var(--accent));
+    transition: width 0.25s;
+  }
+  .meta { margin-top: 12px; color: var(--muted); font-size: 12px; }
+  .meta code { color: var(--ink); }
+  .err {
+    color: var(--bad); margin-top: 12px; padding: 10px;
+    background: rgba(255,122,122,0.08); border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+    white-space: pre-wrap;
+  }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    vertical-align: -2px; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* History */
+  #history { margin-top: 24px; max-width: 1100px; }
+  #history table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #history th, #history td {
+    text-align: left; padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  #history th { color: var(--muted); font-weight: 500; }
+  #history td.score { font-variant-numeric: tabular-nums; font-weight: 600; }
+  #history tr:hover td { background: var(--panel-2); }
+</style>
+</head>
+<body>
+
+<h1>VLM score-one — dev tool</h1>
+<div class="sub">
+  Drop a JPEG, type or pick a dimension, hit Score. Calls <code>POST /score_one</code> → <code>vlm_client.score_one()</code>.
+  This page is the P1D1 verification UI; the real composer at <code>/compose</code> ships on P1D5.
+</div>
+
+<div class="grid">
+
+  <div class="panel">
+    <h2>Image</h2>
+    <label id="drop">
+      <input type="file" id="file" accept="image/jpeg,image/png,image/webp">
+      <div id="droplabel">Click to choose, or drag a JPEG/PNG here</div>
+      <img id="preview" alt="">
+      <div id="fileinfo"></div>
+    </label>
+  </div>
+
+  <div class="panel">
+    <h2>Dimension prompt</h2>
+    <div class="chips" id="chips">
+      <!-- Starter dimensions from Section 7 P1D2 of the build plan -->
+      <span class="chip" data-prompt="How aesthetically pleasing is this image? 0 = ordinary or unpleasant. 1 = strikingly beautiful composition and color.">aesthetic</span>
+      <span class="chip" data-prompt="Semantic conflict between elements. 0 = harmonious, expected together. 1 = strongly discordant (e.g. a dog at a wedding ceremony).">conflict</span>
+      <span class="chip" data-prompt="Tension, ambiguity, unresolved symbolism, or psychological charge that invites further looking. 0 = flat and fully explained. 1 = strongly charged or ambiguous.">tension</span>
+      <span class="chip" data-prompt="Story potential — does the image suggest something happened before, or is about to happen? 0 = static, non-narrative. 1 = strongly narrative.">story</span>
+      <span class="chip" data-prompt="Novelty — how unusual is this scene relative to everyday images? 0 = entirely typical. 1 = highly unusual or rarely-seen.">novelty</span>
+      <span class="chip" data-prompt="Color harmony of the image. 0 = clashing or muddy colors. 1 = harmonious, well-chosen color relationships.">color_harmony</span>
+      <span class="chip" data-prompt="Mystery — does the image conceal information or invite speculation? 0 = fully revealed. 1 = strongly enigmatic.">mystery</span>
+      <span class="chip" data-prompt="Decisive moment — is this a peak instant of action or emotion (Cartier-Bresson sense)? 0 = mundane non-moment. 1 = clearly a peak instant.">decisive_moment</span>
+      <span class="chip" data-prompt="Frame within a frame — does a doorway, window, mirror, or aperture inside the image frame its subject? 0 = no internal frame. 1 = a clear frame-within-frame composition.">frame_within_frame</span>
+    </div>
+    <textarea id="prompt" placeholder="Describe the dimension to grade on. e.g. &quot;Is the subject partially obscured? 0=fully visible, 1=mostly hidden.&quot;"></textarea>
+    <div style="margin-top: 12px;">
+      <button class="primary" id="score" disabled>Score</button>
+    </div>
+    <div id="scorebox">
+      <div class="score-num" id="scorenum">—</div>
+      <div class="score-bar"><div class="score-bar-fill" id="scorebar" style="width: 0%;"></div></div>
+      <div class="meta" id="scoremeta"></div>
+    </div>
+    <div class="err" id="err" style="display: none;"></div>
+  </div>
+</div>
+
+<div id="history" class="panel" style="display: none;">
+  <h2>This session</h2>
+  <table>
+    <thead><tr><th>Image</th><th>Prompt (truncated)</th><th>Score</th><th>Latency</th></tr></thead>
+    <tbody id="historybody"></tbody>
+  </table>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentFile = null;
+
+// --- File picker + drag/drop ---
+const drop = $("drop");
+const fileInput = $("file");
+const preview = $("preview");
+const droplabel = $("droplabel");
+const fileinfo = $("fileinfo");
+
+function setFile(f) {
+  if (!f) return;
+  currentFile = f;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    preview.src = e.target.result;
+    preview.style.display = "block";
+    droplabel.style.display = "none";
+  };
+  reader.readAsDataURL(f);
+  fileinfo.textContent = `${f.name} — ${(f.size / 1024).toFixed(0)} KB`;
+  updateButton();
+}
+
+fileInput.addEventListener("change", (e) => setFile(e.target.files[0]));
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault();
+  drop.classList.remove("over");
+  setFile(e.dataTransfer.files[0]);
+});
+
+// --- Chips → fill textarea ---
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    $("prompt").value = chip.dataset.prompt;
+    updateButton();
+  });
+});
+$("prompt").addEventListener("input", updateButton);
+
+function updateButton() {
+  $("score").disabled = !(currentFile && $("prompt").value.trim());
+}
+
+// --- Score button ---
+$("score").addEventListener("click", async () => {
+  $("err").style.display = "none";
+  $("scorebox").classList.remove("show");
+  const promptText = $("prompt").value;
+  const btn = $("score");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Scoring…';
+
+  const form = new FormData();
+  form.append("image", currentFile);
+  form.append("prompt_text", promptText);
+
+  try {
+    const r = await fetch("/score_one", { method: "POST", body: form });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    showScore(data);
+  } catch (e) {
+    $("err").textContent = e.message;
+    $("err").style.display = "block";
+  } finally {
+    btn.disabled = false; btn.innerHTML = "Score"; updateButton();
+  }
+});
+
+function showScore(data) {
+  $("scorenum").textContent = data.score.toFixed(2);
+  $("scorebar").style.width = `${data.score * 100}%`;
+  $("scoremeta").innerHTML =
+    `<code>${data.filename}</code> · ${(data.size_bytes / 1024).toFixed(0)} KB · ` +
+    `${data.latency_ms.toFixed(0)} ms`;
+  $("scorebox").classList.add("show");
+
+  // append to history
+  const row = document.createElement("tr");
+  const short = (s, n) => s.length > n ? s.slice(0, n) + "…" : s;
+  row.innerHTML = `
+    <td>${data.filename}</td>
+    <td>${short(data.prompt_text, 60)}</td>
+    <td class="score">${data.score.toFixed(2)}</td>
+    <td>${data.latency_ms.toFixed(0)} ms</td>
+  `;
+  $("historybody").prepend(row);
+  $("history").style.display = "block";
+}
+</script>
+</body>
+</html>

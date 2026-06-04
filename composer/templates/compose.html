@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Compose — Interestingness Composer</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel-2: #1f232c;
+    --ink: #e8eaef;
+    --muted: #9aa3b2;
+    --accent: #6ea8ff;
+    --good: #8be38b;
+    --warn: #ffb86b;
+    --bad: #ff7a7a;
+    --line: #2a2f3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    height: 100vh; overflow: hidden;
+  }
+  header {
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header .stats { color: var(--muted); font-size: 12px; }
+  header .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  header button {
+    background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+  header button:hover { border-color: var(--accent); color: var(--accent); }
+
+  main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: calc(100vh - 49px);
+  }
+
+  /* LEFT: prompts panel */
+  #prompts-panel {
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    overflow-y: auto;
+    padding: 16px;
+  }
+  #prompts-panel h2 {
+    margin: 0 0 12px; font-size: 11px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .prompt-row {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .prompt-row:last-child { border-bottom: 0; }
+  .prompt-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 6px;
+  }
+  .prompt-head input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px; height: 16px; cursor: pointer;
+  }
+  .prompt-head label {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 12px; font-weight: 600; flex: 1;
+    cursor: pointer;
+  }
+  .prompt-head .weight-display {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    min-width: 36px; text-align: right;
+  }
+  .prompt-name {
+    font-size: 11px; color: var(--muted);
+    margin-left: 26px;
+  }
+  .slider {
+    width: 100%; margin-top: 6px;
+    accent-color: var(--accent);
+  }
+  .slider:disabled { opacity: 0.3; }
+  .prompt-row.disabled .prompt-head label,
+  .prompt-row.disabled .prompt-name { opacity: 0.4; }
+
+  /* RIGHT: image ranking */
+  #ranking-panel {
+    overflow-y: auto;
+    padding: 16px;
+    background: var(--bg);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+  }
+  .card {
+    position: relative;
+    background: var(--panel);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color 0.1s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(110,168,255,0.3); }
+  .card img {
+    width: 100%; aspect-ratio: 1;
+    object-fit: cover; display: block;
+    background: var(--panel-2);
+  }
+  .card .rank {
+    position: absolute; top: 4px; left: 4px;
+    background: rgba(0,0,0,0.7); color: var(--ink);
+    padding: 1px 6px; font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    border-radius: 3px; font-weight: 600;
+  }
+  .card .score-tag {
+    position: absolute; bottom: 4px; right: 4px;
+    background: rgba(0,0,0,0.7); color: var(--ink);
+    padding: 1px 6px; font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    border-radius: 3px;
+  }
+
+  /* DETAIL panel (slides in from right when card clicked) */
+  #detail {
+    position: fixed; top: 49px; right: 0;
+    width: 340px; height: calc(100vh - 49px);
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    padding: 16px; overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 0.2s;
+    z-index: 10;
+  }
+  #detail.open { transform: translateX(0); }
+  #detail h2 {
+    margin: 0 0 10px; font-size: 11px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  #detail img { width: 100%; border-radius: 6px; margin-bottom: 12px; }
+  #detail .file { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); word-break: break-all; }
+  #detail .big-score {
+    font-size: 36px; font-weight: 600; margin: 8px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  #detail .contrib-row {
+    display: flex; gap: 8px; align-items: center;
+    margin: 6px 0;
+    font-size: 12px;
+  }
+  #detail .contrib-row .pid {
+    font-family: ui-monospace, monospace;
+    color: var(--muted);
+    width: 130px; flex-shrink: 0;
+  }
+  #detail .contrib-bar {
+    flex: 1; height: 6px; background: var(--bg); border-radius: 3px;
+    overflow: hidden; position: relative;
+  }
+  #detail .contrib-bar-fill {
+    height: 100%; background: var(--accent);
+  }
+  #detail .contrib-val {
+    color: var(--ink); width: 50px; text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  #detail .close-btn {
+    float: right; background: transparent; color: var(--muted);
+    border: 0; cursor: pointer; font-size: 18px; padding: 0;
+  }
+  #detail .close-btn:hover { color: var(--ink); }
+
+  .empty {
+    color: var(--muted); padding: 40px; text-align: center;
+  }
+  .empty a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Compose</h1>
+  <span class="stats" id="stats">…</span>
+  <div class="right">
+    <button id="reset-all">Reset all to 0.5</button>
+    <button id="all-on">All on</button>
+    <button id="all-off">All off</button>
+  </div>
+</header>
+
+<main>
+  <aside id="prompts-panel">
+    <h2>Dimensions</h2>
+    <div id="prompts-list"></div>
+  </aside>
+
+  <section id="ranking-panel">
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display: none;"></div>
+  </section>
+</main>
+
+<aside id="detail">
+  <button class="close-btn" id="close-detail">×</button>
+  <h2>Image detail</h2>
+  <img id="detail-img" alt="">
+  <div class="file" id="detail-file"></div>
+  <div class="big-score" id="detail-score">—</div>
+  <h2 style="margin-top: 14px;">Contribution by dimension</h2>
+  <div id="detail-contribs"></div>
+</aside>
+
+<script>
+const $ = id => document.getElementById(id);
+let prompts = [];                       // [{id, name, text, n_scored}]
+let weights = {};                       // {prompt_id: 0..1}
+let enabled = {};                       // {prompt_id: bool}
+let lastResults = [];
+let totalImages = 0;
+let selectedFilename = null;
+let pendingRequest = null;              // debounce ranker calls
+
+async function bootstrap() {
+  const [pr, im] = await Promise.all([
+    fetch("/prompts").then(r => r.json()),
+    fetch("/images").then(r => r.json()),
+  ]);
+  prompts = pr;
+  totalImages = im.count;
+
+  // Initial state: all prompts on, weight 0.5
+  for (const p of prompts) {
+    weights[p.id] = 0.5;
+    enabled[p.id] = true;
+  }
+  renderPrompts();
+  $("stats").textContent = `${totalImages} images · ${prompts.length} dimensions`;
+  scheduleRank();
+}
+
+function renderPrompts() {
+  $("prompts-list").innerHTML = prompts.map(p => {
+    const w = weights[p.id];
+    const on = enabled[p.id];
+    const cachedCoverage = totalImages ? Math.round(100 * p.n_scored / totalImages) : 0;
+    const coverageNote = p.n_scored < totalImages
+      ? `<span style="color:var(--warn)"> · only ${cachedCoverage}% scored</span>`
+      : '';
+    return `
+      <div class="prompt-row ${on ? '' : 'disabled'}" data-id="${p.id}">
+        <div class="prompt-head">
+          <input type="checkbox" id="cb-${p.id}" ${on ? 'checked' : ''}>
+          <label for="cb-${p.id}">${p.id}</label>
+          <span class="weight-display" id="wd-${p.id}">${w.toFixed(2)}</span>
+        </div>
+        <div class="prompt-name">${p.name}${coverageNote}</div>
+        <input type="range" class="slider" id="sl-${p.id}"
+               min="0" max="1" step="0.01" value="${w}"
+               ${on ? '' : 'disabled'}>
+      </div>
+    `;
+  }).join("");
+
+  // Wire each row
+  for (const p of prompts) {
+    $(`cb-${p.id}`).addEventListener("change", e => {
+      enabled[p.id] = e.target.checked;
+      $(`sl-${p.id}`).disabled = !e.target.checked;
+      $(`sl-${p.id}`).closest(".prompt-row").classList.toggle("disabled", !e.target.checked);
+      scheduleRank();
+    });
+    $(`sl-${p.id}`).addEventListener("input", e => {
+      weights[p.id] = parseFloat(e.target.value);
+      $(`wd-${p.id}`).textContent = weights[p.id].toFixed(2);
+      scheduleRank();
+    });
+  }
+}
+
+function scheduleRank() {
+  if (pendingRequest) clearTimeout(pendingRequest);
+  pendingRequest = setTimeout(rank, 80);
+}
+
+async function rank() {
+  // Active = enabled & weight > 0
+  const activeWeights = {};
+  for (const p of prompts) {
+    if (enabled[p.id]) activeWeights[p.id] = weights[p.id];
+  }
+  if (Object.values(activeWeights).every(v => v === 0)) {
+    $("grid").innerHTML = "";
+    $("empty").style.display = "block";
+    $("empty").innerHTML = "No active dimensions with weight &gt; 0. Toggle some on.";
+    return;
+  }
+  $("empty").style.display = "none";
+
+  const r = await fetch("/compose/ranking", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ weights: activeWeights }),
+  });
+  const data = await r.json();
+  lastResults = data.results;
+  renderGrid();
+
+  // Refresh open detail panel if its image is still in results
+  if (selectedFilename) {
+    const found = lastResults.find(r => r.filename === selectedFilename);
+    if (found) renderDetail(found, lastResults.indexOf(found));
+  }
+}
+
+function renderGrid() {
+  $("grid").innerHTML = lastResults.map((r, i) => `
+    <div class="card ${r.filename === selectedFilename ? 'selected' : ''}"
+         data-filename="${r.filename}">
+      <img loading="lazy" src="/images/${r.filename}" alt="">
+      <div class="rank">#${i+1}</div>
+      <div class="score-tag">${r.score.toFixed(2)}</div>
+    </div>
+  `).join("");
+  document.querySelectorAll(".card").forEach(card => {
+    card.addEventListener("click", () => {
+      const fn = card.dataset.filename;
+      const idx = lastResults.findIndex(r => r.filename === fn);
+      selectedFilename = fn;
+      renderDetail(lastResults[idx], idx);
+      renderGrid();  // re-render to update selected state
+    });
+  });
+}
+
+function renderDetail(result, rankIdx) {
+  $("detail-img").src = `/images/${result.filename}`;
+  $("detail-file").textContent = `#${rankIdx+1} · ${result.filename}`;
+  $("detail-score").textContent = result.score.toFixed(2);
+
+  // Sort contributions by absolute magnitude
+  const entries = Object.entries(result.contributions || {})
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const maxAbs = entries.length ? Math.max(...entries.map(e => Math.abs(e[1]))) : 1;
+
+  $("detail-contribs").innerHTML = entries.map(([pid, val]) => {
+    const pct = maxAbs > 0 ? (Math.abs(val) / maxAbs * 100).toFixed(0) : 0;
+    return `
+      <div class="contrib-row">
+        <div class="pid">${pid}</div>
+        <div class="contrib-bar"><div class="contrib-bar-fill" style="width:${pct}%"></div></div>
+        <div class="contrib-val">${val >= 0 ? '+' : ''}${val.toFixed(2)}</div>
+      </div>
+    `;
+  }).join("");
+  $("detail").classList.add("open");
+}
+
+$("close-detail").addEventListener("click", () => {
+  $("detail").classList.remove("open");
+  selectedFilename = null;
+  renderGrid();
+});
+
+// Global controls
+$("reset-all").addEventListener("click", () => {
+  for (const p of prompts) { weights[p.id] = 0.5; enabled[p.id] = true; }
+  renderPrompts(); scheduleRank();
+});
+$("all-on").addEventListener("click", () => {
+  for (const p of prompts) enabled[p.id] = true;
+  renderPrompts(); scheduleRank();
+});
+$("all-off").addEventListener("click", () => {
+  for (const p of prompts) enabled[p.id] = false;
+  renderPrompts(); scheduleRank();
+});
+
+bootstrap();
+</script>
+</body>
+</html>

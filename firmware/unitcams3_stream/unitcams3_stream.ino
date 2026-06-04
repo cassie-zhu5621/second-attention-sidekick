@@ -1,5 +1,5 @@
 /*
- * unitcams3_webcam.ino — M5Stack Unit CamS3-5MP (PY260) MJPEG stream
+ * unitcams3_stream.ino — M5Stack Unit CamS3-5MP (PY260) MJPEG stream
  * =====================================================================
  * This is M5's official web_cam example (the one that actually drives the
  * PY260 sensor). It streams motion-JPEG over Wi-Fi at  http://<camera-ip>/
@@ -23,8 +23,9 @@
 #include "esp_camera.h"
 
 // ======================= EDIT THESE =======================
-const char* ssid     = "5C6199D481FE-2G";       // <-- your Wi-Fi name
-const char* password = "6yyvhwhzcv7rf0";    // <-- your Wi-Fi password
+const char* ssid     = "YOUR_WIFI";        // <-- set per network, then RE-FLASH
+const char* password = "YOUR_PASSWORD";    // <-- set per network, then RE-FLASH
+const char* HOSTNAME = "sidekick-loop";    // loop cam = "sidekick-loop"; collector cam = "sidekick-cam"
 // ==========================================================
 
 WiFiServer server(80);
@@ -109,10 +110,10 @@ void setup()
     Serial.println(WiFi.localIP());   // <-- open http://<this>/ in a browser
     server.begin();
 
-    // mDNS: reachable as http://sidekick-cam.local/ regardless of IP
-    if (MDNS.begin("sidekick-cam")) {
+    // mDNS: reachable as http://sidekick-loop.local/ regardless of IP
+    if (MDNS.begin(HOSTNAME)) {
         MDNS.addService("http", "tcp", 80);
-        Serial.println("mDNS ready: http://sidekick-cam.local/");
+        Serial.print("mDNS ready: http://"); Serial.print(HOSTNAME); Serial.println(".local/");
     }
 }
 

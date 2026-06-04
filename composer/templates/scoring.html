@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bulk scoring — Interestingness Composer (P1D3)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel-2: #1f232c;
+    --ink: #e8eaef;
+    --muted: #9aa3b2;
+    --accent: #6ea8ff;
+    --good: #8be38b;
+    --warn: #ffb86b;
+    --bad: #ff7a7a;
+    --line: #2a2f3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 13px; max-width: 720px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+    max-width: 920px;
+  }
+  .panel h2 {
+    margin: 0 0 12px; font-size: 13px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  .global-controls {
+    display: flex; gap: 12px; align-items: center;
+    margin-bottom: 18px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  button {
+    background: var(--accent); color: #001431; border: 0;
+    border-radius: 6px; padding: 8px 14px; font-weight: 600;
+    cursor: pointer; font-size: 13px;
+    transition: 0.1s;
+  }
+  button.secondary {
+    background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .corpus-stats { color: var(--muted); font-size: 12px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tbody tr { border-top: 1px solid var(--line); }
+  tbody tr:hover td { background: var(--panel-2); }
+
+  .name {
+    font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 12px;
+  }
+  .name-label { color: var(--muted); font-size: 11px; font-weight: 400; }
+  .count {
+    font-variant-numeric: tabular-nums;
+    width: 100px; color: var(--muted);
+  }
+  .count strong { color: var(--ink); }
+  .count.full strong { color: var(--good); }
+
+  .bar {
+    height: 8px; background: var(--bg);
+    border-radius: 4px; overflow: hidden;
+    min-width: 200px;
+  }
+  .bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--good));
+    width: 0%;
+    transition: width 0.3s;
+  }
+  .bar-fill.full { background: var(--good); }
+
+  .status { font-size: 12px; color: var(--muted); }
+  .status.running { color: var(--accent); }
+  .status.done { color: var(--good); }
+  .status.error { color: var(--bad); }
+
+  .spinner {
+    display: inline-block; width: 10px; height: 10px;
+    border: 2px solid rgba(255,255,255,0.15);
+    border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    vertical-align: -1px; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .info-box {
+    margin-top: 16px; padding: 12px;
+    background: var(--panel-2); border-radius: 6px;
+    font-size: 12px; color: var(--muted);
+  }
+  .info-box code { color: var(--ink); background: var(--bg); padding: 1px 5px; border-radius: 3px; }
+  .err {
+    color: var(--bad); padding: 10px;
+    background: rgba(255,122,122,0.08); border-radius: 6px;
+    font-family: ui-monospace, monospace; font-size: 12px;
+    margin-top: 12px; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<h1>Bulk scoring</h1>
+<div class="sub">
+  Score every image in the corpus on each prompt. Cache-aware — already-scored
+  pairs are skipped (free). At ~2 s/image and concurrency 8, expect ~1 min per
+  220-image prompt. Approximate cost per prompt: $0.22.
+</div>
+
+<div class="panel">
+  <div class="global-controls">
+    <button id="run-all">Run all unscored prompts</button>
+    <button id="refresh" class="secondary">Refresh</button>
+    <span class="corpus-stats" id="corpus-stats">…</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Prompt</th>
+        <th>Progress</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div class="info-box">
+    Endpoints: <code>POST /score_all/{prompt_id}</code> starts a job;
+    <code>GET /score_all/status</code> returns all jobs;
+    <code>GET /score_all/status/{prompt_id}</code> returns one.
+    Refresh is automatic while anything is running.
+  </div>
+
+  <div id="err"></div>
+</div>
+
+<script>
+let prompts = [];
+let statuses = {};
+let totalImages = 0;
+let pollTimer = null;
+
+async function fetchPrompts() {
+  const r = await fetch("/prompts");
+  prompts = await r.json();
+}
+
+async function fetchImages() {
+  const r = await fetch("/images");
+  const data = await r.json();
+  totalImages = data.count;
+}
+
+async function fetchStatuses() {
+  const r = await fetch("/score_all/status");
+  statuses = await r.json();
+}
+
+async function refreshAll() {
+  try {
+    await Promise.all([fetchPrompts(), fetchImages(), fetchStatuses()]);
+    render();
+    const anyRunning = Object.values(statuses).some(s => !s.completed);
+    if (anyRunning && !pollTimer) startPolling();
+    if (!anyRunning && pollTimer) stopPolling();
+  } catch (e) {
+    document.getElementById("err").innerHTML = `<div class="err">${e.message}</div>`;
+  }
+}
+
+function startPolling() {
+  pollTimer = setInterval(refreshAll, 1000);
+}
+function stopPolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+function render() {
+  document.getElementById("corpus-stats").textContent =
+    `${totalImages} images · ${prompts.length} prompts in library`;
+
+  const rows = prompts.map(p => {
+    const scored = p.n_scored;
+    const job = statuses[p.id];
+    const isRunning = job && !job.completed;
+    const isDone    = job && job.completed && !job.error;
+    const isErr     = job && job.error;
+    const isFull    = scored >= totalImages;
+
+    // Use job state if running; else use n_scored from /prompts
+    const liveScored = isRunning ? (job.cached + job.scored) : scored;
+    const pct = totalImages ? Math.round(100 * liveScored / totalImages) : 0;
+
+    let statusHTML;
+    if (isRunning) {
+      const elapsed = job.started_at ? Math.round(Date.now()/1000 - job.started_at) : 0;
+      statusHTML = `<span class="status running"><span class="spinner"></span>running · ${elapsed}s</span>`;
+    } else if (isErr) {
+      statusHTML = `<span class="status error">error: ${job.error}</span>`;
+    } else if (isDone && job.elapsed_s) {
+      statusHTML = `<span class="status done">done · ${job.elapsed_s}s</span>`;
+    } else if (isFull) {
+      statusHTML = `<span class="status done">fully scored</span>`;
+    } else {
+      statusHTML = `<span class="status">${totalImages - scored} pending</span>`;
+    }
+
+    return `
+      <tr>
+        <td>
+          <div class="name">${p.id}</div>
+          <div class="name-label">${p.name}</div>
+        </td>
+        <td>
+          <div class="count ${isFull?'full':''}"><strong>${liveScored}</strong> / ${totalImages}</div>
+          <div class="bar"><div class="bar-fill ${isFull?'full':''}" style="width: ${pct}%;"></div></div>
+        </td>
+        <td>${statusHTML}</td>
+        <td>
+          <button class="secondary" data-id="${p.id}"
+                  ${isRunning || isFull ? "disabled" : ""}>
+            ${isFull ? "✓" : "Score"}
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  document.getElementById("rows").innerHTML = rows;
+
+  // Wire up the per-prompt Score buttons
+  document.querySelectorAll("button[data-id]").forEach(btn => {
+    btn.addEventListener("click", () => startJob(btn.dataset.id));
+  });
+}
+
+async function startJob(promptId) {
+  try {
+    const r = await fetch(`/score_all/${promptId}`, { method: "POST" });
+    if (!r.ok) {
+      const j = await r.json();
+      throw new Error(j.detail || `HTTP ${r.status}`);
+    }
+    await refreshAll();
+  } catch (e) {
+    document.getElementById("err").innerHTML = `<div class="err">${e.message}</div>`;
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", refreshAll);
+document.getElementById("run-all").addEventListener("click", async () => {
+  // Start sequentially — kick off one, wait until done, then the next.
+  // Easier to monitor and avoids 6×8 = 48 concurrent calls hitting rate limits.
+  const incomplete = prompts.filter(p => p.n_scored < totalImages);
+  if (!incomplete.length) {
+    alert("All prompts already fully scored.");
+    return;
+  }
+  document.getElementById("run-all").disabled = true;
+  document.getElementById("run-all").textContent = "Running…";
+  for (const p of incomplete) {
+    await startJob(p.id);
+    // Wait for THIS prompt's job to complete before moving on.
+    while (true) {
+      await new Promise(r => setTimeout(r, 1500));
+      await fetchStatuses();
+      const j = statuses[p.id];
+      if (j && j.completed) break;
+    }
+  }
+  document.getElementById("run-all").disabled = false;
+  document.getElementById("run-all").textContent = "Run all unscored prompts";
+  refreshAll();
+});
+
+refreshAll();
+</script>
+</body>
+</html>

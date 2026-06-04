@@ -1,0 +1,34 @@
+# Interestingness_Composer — Part 2 dependencies
+# Python 3.11+ on M4 (MPS-capable). Sibling to Spatial_Camera (Part 1).
+#
+# Phase 1 (V1 slider composer) — pure arithmetic, no ML. These six are all you need.
+# Phase 3 (V2 learned mode) will add scikit-learn (see commented line below).
+# Phase 4 (optional) — only if you re-enable layer1.py for prompt-text embeddings,
+# uncomment torch + transformers.
+
+# --- Web server (Phase 1) ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9     # required by FastAPI for File uploads
+
+# --- Image handling (Phase 1) ---
+pillow>=10.0
+numpy>=1.26
+
+# --- VLM scoring (Phase 1) ---
+anthropic>=0.40             # Claude Sonnet 4.6 client
+
+# --- Phase 3: V2 learned mode (uncomment in Week 3) ---
+# scikit-learn>=1.4
+
+# --- Phase 4 (optional): prompt-text similarity via layer1.py ---
+# torch>=2.2
+# transformers>=4.40
+# pillow-heif>=0.16
+
+# --- One-off, corpus setup only (NOT a runtime dep) ---
+# Used by `python import_images.py imagenette` to seed images/ from
+# HuggingFace. Install only when (re-)building the corpus; not needed by
+# the server. Uncomment if/when you want a reproducible setup pip install.
+# datasets>=2.18,<3.0
+# huggingface_hub>=0.20
