@@ -131,6 +131,23 @@ def score_dims_live(jpeg: bytes, content: str = "", model: str = MODEL):
         return {d: 0.0 for d in DIM_NAMES}, 0.0
 
 
+def caption(jpeg: bytes, model: str = MODEL) -> str:
+    """One short 'field note' sentence summarizing the noticed moment (for the online feed)."""
+    if os.environ.get("SECONDATTN_OFFLINE") == "1":
+        return "a quiet moment in the room"
+    import anthropic
+    client = anthropic.Anthropic()
+    b64 = base64.standard_b64encode(jpeg).decode()
+    msg = client.messages.create(
+        model=model, max_tokens=60,
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+            {"type": "text", "text": "Write ONE short sentence (max 16 words), like a quiet field note, "
+                                     "describing what is worth noticing in this frame. No preamble, no quotes."}]}],
+    )
+    return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip().strip('"')
+
+
 def _grab_one_frame(camera_url: str) -> bytes:
     """Pull a single JPEG out of the camera's MJPEG stream."""
     import requests

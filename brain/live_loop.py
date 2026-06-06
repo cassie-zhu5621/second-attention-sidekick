@@ -19,9 +19,11 @@ Run: python3 live_loop.py --camera http://sidekick-loop.local
 import argparse
 import glob
 import json
+import os
 import re
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,7 +34,9 @@ import serial
 
 import taste
 from taste import DIM_NAMES
-from live_brain import score_dims_live
+from live_brain import score_dims_live, caption
+
+WEBHOOK = os.environ.get("SIDEKICK_WEBHOOK", "")   # Discord webhook URL (set via env or --webhook)
 
 PAN_STEPS  = [-60, -40, -20, 0, 20, 40, 60]
 TILT_STEPS = [-25, 0, 25]
@@ -64,12 +68,14 @@ STATE = {
     "event_id": 0, "event": "", "log": [],
     "thresh": 0.55, "lost": 0.4, "cooldown": 60.0, "settle": 0.6,
     "dims": {d: 0.0 for d in DIM_NAMES}, "weights": dict(weights),
-    "content": "", "match": 0.0,
+    "content": "", "match": 0.0, "caption": "",
 }
 # words that signal "tune a dimension" vs "this is a content/object to look for"
 DIRECTION = {"more", "less", "no", "not", "care", "focus", "emphasize",
              "love", "like", "want", "prefer", "avoid", "without", "stop"}
 CAM = None
+RECENT = deque(maxlen=12)   # (id, jpeg bytes) — recent captures for the panel thumbnail strip
+_thumb_n = 0
 
 
 def clamp(x):
@@ -100,6 +106,20 @@ def why(dims):
 def emit(kind, msg):
     STATE["event_id"] += 1; STATE["event"] = kind
     STATE["log"] = ([f"{datetime.now():%H:%M:%S}  {msg}"] + STATE["log"])[:30]
+
+
+def post_online(jpeg, text):
+    """Send the noticed frame + its one-line report to the online feed (Discord webhook)."""
+    if not WEBHOOK:
+        return
+    def _send():
+        try:
+            requests.post(WEBHOOK,
+                          data={"content": text, "username": "potato \U0001F954"},  # display name
+                          files={"file": ("notice.jpg", jpeg, "image/jpeg")}, timeout=15)
+        except Exception as e:
+            print(f"[post] {e}")
+    threading.Thread(target=_send, daemon=True).start()
 
 
 def evaluate(jpeg):
@@ -210,8 +230,11 @@ input[type=range]{width:100%;accent-color:var(--acid)}
 .dbar{height:8px;background:#000;border:1px solid var(--line);border-radius:5px;overflow:hidden}
 .dbar i{display:block;height:100%;background:var(--acid)}
 .log{margin-top:8px;font-size:11px;color:var(--dim);line-height:1.7;max-height:24vh;overflow:auto}.log div:first-child{color:var(--acid)}
+.thumbs{display:flex;gap:4px;flex-wrap:wrap;margin-top:12px}
+.thumbs img{width:56px;height:42px;object-fit:cover;border:1px solid var(--line);border-radius:3px}
+.thumbs img:first-child{border-color:var(--acid)}
 </style></head><body>
-<header><div class="logo">SECOND<b>·</b>ATTENTION <span class=dim>/ CONTROL</span></div>
+<header><div class="logo" style="font-size:22px;letter-spacing:0">🥔</div>
  <input id=say type=text placeholder="shape its taste: 'more story, less clutter'"><button id=setbtn>SET</button>
  <div class=sp></div><span class=dim>NOTICED <b id=noticed class=acid>0</b></span><button id=snd class=ghost>SOUND ON</button></header>
 <main>
@@ -222,6 +245,8 @@ input[type=range]{width:100%;accent-color:var(--acid)}
   <div class=kv>worth <b id=worth>0.00</b> &middot; <span id=reason></span></div>
   <div class=kv>aim <b id=pan>0</b>,<b id=tilt>0</b> &middot; dwell <b id=held>0</b>s</div>
   <div class=kv>looking for <b id=content class=acid>—</b> &middot; match <b id=match>0.00</b></div>
+  <div class=kv style="margin-top:14px">recent captures</div>
+  <div class=thumbs id=thumbs></div>
  </section>
  <section class=right>
   <h2>TUNING (live)</h2>
@@ -261,6 +286,8 @@ async function tick(){try{const s=await(await fetch("/state",{cache:"no-store"})
  $("#dims").innerHTML=dimRows(s.dims,s.weights);
  $("#frame").src="/frame?t="+Date.now();
  if(s.event_id!==lastEvent){lastEvent=s.event_id;if(s.event)play(s.event);$("#log").innerHTML=s.log.map(l=>"<div>"+l+"</div>").join("");}
+ try{const th=await(await fetch("/thumbs",{cache:"no-store"})).json();
+  $("#thumbs").innerHTML=th.map(i=>'<img src="/thumb?id='+i+'">').join("");}catch(e){}
 }catch(e){}}
 setInterval(tick,1000);tick();
 </script></body></html>"""
@@ -281,6 +308,12 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/frame":
             f = CAM.grab() if CAM else None
             self._send(200, "image/jpeg", f) if f else self._send(503, "text/plain", "no frame")
+        elif p == "/thumbs":
+            self._send(200, "application/json", json.dumps([i for i, _ in RECENT][::-1]))  # newest first
+        elif p == "/thumb":
+            i = int((q.get("id", ["0"])[0]) or 0)
+            b = next((b for tid, b in RECENT if tid == i), None)
+            self._send(200, "image/jpeg", b) if b else self._send(404, "text/plain", "gone")
         elif p == "/set":
             for k in ("thresh", "lost", "cooldown", "settle"):
                 if k in q:
@@ -298,16 +331,18 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global CAM
+    global CAM, WEBHOOK
     ap = argparse.ArgumentParser()
     ap.add_argument("--camera", default="http://sidekick-loop.local")
     ap.add_argument("--port", default=None)
+    ap.add_argument("--webhook", default=WEBHOOK, help="online feed URL (Discord webhook); posts noticed frame + report")
     ap.add_argument("--thresh", type=float, default=0.55)
     ap.add_argument("--lost", type=float, default=0.4)
     ap.add_argument("--cooldown", type=float, default=60.0)
     ap.add_argument("--settle", type=float, default=0.6)
     ap.add_argument("--web-port", type=int, default=8090)
     args = ap.parse_args()
+    WEBHOOK = args.webhook or ""
 
     # Layer 3: load this place's learned taste if it exists
     if PROFILE.exists():
@@ -337,12 +372,39 @@ def main():
     STATE["online"] = True
     print("streaming. (Ctrl+C to stop)\n")
 
+    def ensure_serial():
+        nonlocal ser
+        if ser is not None:
+            return
+        p = args.port or find_port()
+        if not p:
+            return
+        try:
+            ser = serial.Serial(p, 115200, timeout=1); time.sleep(2)
+            print(f"[serial] (re)connected on {p}")
+        except Exception:
+            ser = None
+
     def move(p, t):
-        if ser: ser.write(f"{p},{t}\n".encode())
+        nonlocal ser
+        if ser is None:
+            ensure_serial()
+        if ser is None:
+            return
+        try:
+            ser.write(f"{p},{t}\n".encode())
+        except Exception as e:
+            print(f"[serial] lost R4 ({e}) — retrying; check USB cable / servo 5V power")
+            try: ser.close()
+            except Exception: pass
+            ser = None
 
     def capture(jpeg, worth):
+        global _thumb_n
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         (OUT / f"cap_{ts}_{worth:0.2f}.jpg").write_bytes(jpeg)
+        _thumb_n += 1
+        RECENT.append((_thumb_n, jpeg))   # feed the panel thumbnail strip
 
     path = scan_path(); idx = 0; cooloff = 0
     try:
@@ -363,10 +425,14 @@ def main():
                 idx = (idx + 1) % len(path); continue
 
             STATE["mode"] = "dwell"; STATE["noticed"] += 1
-            emit("notice", f"noticed ({worth:.2f}) — {why(dims)}")
-            print(f"  NOTICE ({worth:.2f}) -> dwell")
-            capture(jpeg, worth)
-            dwell_start = time.time(); last_cap = time.time(); lost = 0
+            cap = caption(jpeg)                     # one-line report (extra haiku call, only on notice)
+            STATE["caption"] = cap
+            emit("notice", f"noticed ({worth:.2f}) — {cap}")
+            print(f"  NOTICE ({worth:.2f}) — {cap}")
+            capture(jpeg, worth)                    # local copy in live_captures/ (separate from dataset/)
+            post_online(jpeg, f"\U0001F50D noticed ({worth:.2f}) — {cap}")   # -> online feed
+            dwell_start = time.time(); lost = 0
+            posted = 1; last_post = time.time()     # at most 3 images per discovery, spaced ~8s
             while True:
                 apply_taste_if_changed()
                 time.sleep(2.5)
@@ -378,8 +444,11 @@ def main():
                     w = 0.0
                 held = time.time() - dwell_start
                 STATE["worth"], STATE["held"] = w, held
-                if jpeg and w >= STATE["thresh"] and time.time() - last_cap >= 5:
-                    capture(jpeg, w); last_cap = time.time()
+                if jpeg and w >= STATE["thresh"]:
+                    capture(jpeg, w)              # keep capturing every 2.5s while still above threshold
+                    if posted < 3 and time.time() - last_post >= 8:   # online: up to 3 per discovery
+                        post_online(jpeg, f"\U0001F50D still — {cap}")
+                        posted += 1; last_post = time.time()
                 lost = lost + 1 if w < STATE["lost"] else 0
                 if held >= STATE["cooldown"]:
                     emit("bored", "bored -> turning away"); print("  bored -> turn away\n")
@@ -390,7 +459,8 @@ def main():
     except KeyboardInterrupt:
         print(f"\nstopped. noticed {STATE['noticed']} -> {OUT}")
         if ser:
-            ser.write(b"off\n"); time.sleep(0.2); ser.close()   # relax servos immediately
+            try: ser.write(b"off\n"); time.sleep(0.2); ser.close()   # relax servos immediately
+            except Exception: pass
         save_profile()
 
 
