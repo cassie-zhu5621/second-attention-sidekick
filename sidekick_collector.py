@@ -40,11 +40,14 @@ CAMERA  = "http://sidekick-cam.local"   # mDNS name — no IP needed (pass --cam
 POLL    = 0.5
 MIN_GAP = 2.5
 THRESH  = 8.0
+INTERVAL = 5.0    # timed mode: seconds between saves (adjustable live in the WebUI)
+MODE    = "timed"  # "timed" = one frame every INTERVAL sec, NO judgement; "still" = only when view is still
 DATASET = Path(__file__).parent / "dataset"
 WEBUI   = Path(__file__).parent / "webui" / "index.html"
 
 state = {"online": False, "recording": False, "count": 0,
-         "still": False, "diff": 999, "last_jpeg": None}
+         "still": False, "diff": 999, "last_jpeg": None,
+         "mode": MODE, "interval": INTERVAL}
 _prev = None
 
 _session = requests.Session()
@@ -102,19 +105,25 @@ def stream_loop():
                     if nframes % 30 == 0:
                         print(f"[stream] {nframes} frames received (live)")
                     now = time.time()
-                    if now - last_proc >= POLL:
+                    if now - last_proc >= POLL:           # stillness is only for display / "still" mode
                         last_proc = now
                         d = frame_diff(jpeg)
                         state["diff"] = round(d, 1)
                         state["still"] = (d <= THRESH)
-                        if state["recording"] and state["still"] and (now - last_save) >= MIN_GAP:
+                    # save decision runs every frame so the timed interval is as precise as the stream allows
+                    if state["recording"]:
+                        if state["mode"] == "timed":      # pure time-lapse, NO judgement
+                            due = (now - last_save) >= state["interval"]
+                        else:                              # "still" mode: only save a paused/observing view
+                            due = state["still"] and (now - last_save) >= MIN_GAP
+                        if due:
                             last_save = now
                             seq += 1
                             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                             fn = f"IMG_{seq:05d}_{ts}.jpg"
                             (DATASET / fn).write_bytes(jpeg)
                             state["count"] += 1
-                            print(f"saved #{seq}  {fn}  ({len(jpeg)//1024}KB)  diff={d:.1f}")
+                            print(f"saved #{seq}  {fn}  ({len(jpeg)//1024}KB)  [{state['mode']}]")
                 if len(buf) > 2_000_000:
                     buf = buf[-200_000:]
         except Exception as e:
@@ -144,7 +153,17 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/status":
             self._send(200, "application/json", json.dumps({
                 "online": state["online"], "recording": state["recording"],
-                "count": state["count"], "still": state["still"], "diff": state["diff"]}))
+                "count": state["count"], "still": state["still"], "diff": state["diff"],
+                "mode": state["mode"], "interval": state["interval"]}))
+        elif p == "/api/set":
+            q = parse_qs(u.query)
+            if "interval" in q:
+                try: state["interval"] = max(0.2, float(q["interval"][0]))
+                except ValueError: pass
+            if q.get("mode", [""])[0] in ("timed", "still"):
+                state["mode"] = q["mode"][0]
+            self._send(200, "application/json",
+                       json.dumps({"interval": state["interval"], "mode": state["mode"]}))
         elif p == "/api/list":
             self._send(200, "application/json",
                        json.dumps(sorted(f.name for f in DATASET.glob("*.jpg"))))
@@ -171,13 +190,18 @@ def main():
     ap.add_argument("--poll", type=float, default=POLL)
     ap.add_argument("--min-gap", type=float, default=MIN_GAP)
     ap.add_argument("--thresh", type=float, default=THRESH)
+    ap.add_argument("--interval", type=float, default=INTERVAL, help="timed mode: seconds between saves")
+    ap.add_argument("--mode", choices=["timed", "still"], default=MODE,
+                    help="timed = every --interval sec (no judgement); still = only paused views")
     ap.add_argument("--port", type=int, default=8000)
     args = ap.parse_args()
     CAMERA = args.camera.rstrip("/"); POLL = args.poll; MIN_GAP = args.min_gap; THRESH = args.thresh
+    state["interval"] = args.interval; state["mode"] = args.mode
 
     threading.Thread(target=stream_loop, daemon=True).start()
     print(f"Camera    : {CAMERA}/  (MJPEG stream, via requests)")
-    print(f"Stillness : {'ON' if STILLNESS_OK else 'OFF (pip install pillow numpy)'}  thresh {THRESH}")
+    print(f"Mode      : {state['mode']}" + (f"  (every {state['interval']}s, no judgement)"
+          if state['mode'] == 'timed' else f"  (still only, thresh {THRESH})"))
     print(f"Dataset   : {DATASET}")
     print(f"Open      : http://localhost:{args.port}\n")
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()

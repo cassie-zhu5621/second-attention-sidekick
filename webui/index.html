@@ -49,6 +49,10 @@
   <div class="spacer"></div>
   <div class="stat"><span id="dot" class="dot"></span><span id="state">connecting</span></div>
   <div class="stat">FRAMES <span id="count" class="num">0</span></div>
+  <button id="mode" class="ghost">MODE: TIMED</button>
+  <div class="stat">EVERY <input id="iv" type="number" min="0.5" step="0.5" value="5"
+       style="width:54px; background:#000; border:1px solid var(--line); color:var(--acid);
+              font:inherit; font-weight:700; padding:5px 6px; border-radius:2px"> s</div>
   <button id="rec" class="ghost">● START</button>
   <button id="auto" class="ghost">AUTO ·</button>
 </header>
@@ -62,7 +66,7 @@
   <section class="grid-wrap">
     <h2>CAPTURES</h2>
     <div id="grid" class="grid"></div>
-    <div id="empty" class="empty">press START — saves only when the view is still</div>
+    <div id="empty" class="empty">press START — TIMED saves one frame every N seconds; STILL saves only paused views</div>
   </section>
 </main>
 
@@ -70,7 +74,7 @@
 
 <script>
 const $ = s => document.querySelector(s);
-let autoOn = true, recording = false, seen = new Set();
+let autoOn = true, recording = false, mode = "timed", seen = new Set();
 
 function refreshLive(){ $("#live").src = "/api/live?t=" + Date.now(); }
 
@@ -85,6 +89,9 @@ async function refreshStatus(){
     $("#rec").classList.toggle("rec-on", recording);
     $("#livestate").textContent = s.still ? "OBSERVING" : "searching";
     $("#livediff").textContent = s.diff;
+    mode = s.mode || "timed";
+    $("#mode").textContent = "MODE: " + mode.toUpperCase();
+    if(document.activeElement !== $("#iv")) $("#iv").value = s.interval;
   }catch(e){
     $("#dot").classList.remove("on"); $("#state").textContent = "collector offline";
   }
@@ -121,6 +128,16 @@ $("#auto").onclick = () => {
   autoOn = !autoOn;
   $("#auto").textContent = autoOn ? "AUTO ·" : "PAUSED";
   $("#auto").style.color = autoOn ? "" : "var(--acid)";
+};
+$("#iv").onchange = async () => {
+  const v = Math.max(0.5, parseFloat($("#iv").value) || 5);
+  try{ await fetch("/api/set?interval=" + v, {cache:"no-store"}); }catch(e){}
+  refreshStatus();
+};
+$("#mode").onclick = async () => {
+  const next = mode === "timed" ? "still" : "timed";
+  try{ await fetch("/api/set?mode=" + next, {cache:"no-store"}); }catch(e){}
+  refreshStatus();
 };
 $("#box").onclick = () => $("#box").classList.remove("show");
 </script>
