@@ -15,3 +15,8 @@ venv/
 # Arduino build output
 build/
 *.bin
+
+# new system outputs
+**/_perception/
+live_captures/
+*.png

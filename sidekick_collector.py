@@ -43,7 +43,7 @@ THRESH  = 8.0
 INTERVAL = 5.0    # timed mode: seconds between saves (adjustable live in the WebUI)
 MODE    = "timed"  # "timed" = one frame every INTERVAL sec, NO judgement; "still" = only when view is still
 DATASET = Path(__file__).parent / "dataset"
-WEBUI   = Path(__file__).parent / "webui" / "index.html"
+WEBUI   = Path(__file__).parent / "archive" / "webui" / "index.html"  # webui moved to archive/
 
 state = {"online": False, "recording": False, "count": 0,
          "still": False, "diff": 999, "last_jpeg": None,
