@@ -323,6 +323,7 @@ class TemporalConfigGate:
     present: dict = field(default_factory=dict)       # non-baseline motif -> consecutive frames present
     trans_counts: Counter = field(default_factory=Counter)   # habituation over TRANSITIONS
     _twin: dict = field(default_factory=dict)         # type -> deque of recent present(1)/absent(0)
+    _warm: int = 0
 
     @staticmethod
     def _types_of(m):
@@ -335,16 +336,7 @@ class TemporalConfigGate:
         bag = d["bag"]
         cur = set(bag)
         cur_types = set(nodes.values())
-        if not self.baseline:                    # first frame: adopt as baseline, no event
-            self.baseline, self.base_types = cur, cur_types
-            d.update(event=False, delta_added=[], left=[], arrived=[], subject=None, change=0.0)
-            return d
 
-        # The EVENT is a persistent STRUCTURAL CHANGE vs the committed baseline (add OR remove —
-        # so departures, arrivals AND returns all count). Flicker is filtered by `persist`. Then
-        # HABITUATION is applied to the TRANSITION itself: the FIRST time a given change happens
-        # it fires; if the SAME transition (e.g. this person leaving) recurs, its count rises and
-        # it is optimised away (boredom). Pure structure; one mechanism; no novelty/type layer.
         # per-type rolling presence -> only STABLE types count (kills background detector flicker,
         # e.g. a bookshelf/desk flickering in&out or being briefly occluded; saves wasted VLM calls).
         for t in set(self._twin) | cur_types:
@@ -355,6 +347,19 @@ class TemporalConfigGate:
             return bool(dq) and sum(dq) >= self.stable_frac * dq.maxlen
         def motif_stable(m):
             return all(stable(t) for t in self._types_of(m))
+
+        # WARM-UP: the first `window` frames just learn this view's normal (let stability settle),
+        # no events — avoids startup oscillation as detections warm up. Then freeze the baseline.
+        self._warm += 1
+        if self._warm <= self.window:
+            self.baseline = cur
+            self.base_types = {t for t in self._twin if stable(t)}
+            d.update(event=False, delta_added=[], left=[], arrived=[], subject=None, change=0.0)
+            return d
+
+        # The EVENT is a persistent STRUCTURAL CHANGE vs the committed baseline (add OR remove —
+        # departures, arrivals AND returns all count). HABITUATION is applied to the TRANSITION:
+        # first time a change happens it fires; the same transition recurring is optimised away.
 
         for m in cur:
             self.present[m] = self.present.get(m, 0) + 1
@@ -367,15 +372,19 @@ class TemporalConfigGate:
         confirmed_removed = [m for m in self.baseline
                              if self.absent.get(m, 0) >= self.persist and motif_stable(m)]
 
+        # structural change = a stable OBJECT (node) arrived/left  OR  motifs (edges) added/removed.
+        # node-level is included so a new isolated object (e.g. a person who just appeared, not yet
+        # near anything) still counts — a node IS structure. Only STABLE types count (flicker-proof).
+        present_types = {t for t in self._twin if stable(t)}
+        type_arr = present_types - self.base_types
+        type_gone = self.base_types - present_types
+
         event, delta_added, left, arrived, subject, change = False, [], [], [], None, 0.0
-        if confirmed_added or confirmed_removed:
-            # transition signature: arrivals/departures keyed at TYPE level (so "person leaves"
-            # recurring habituates), pure reconfiguration keyed at motif level (distinct rewirings
-            # each get their own first-time fire).
-            t_add = cur_types - self.base_types
-            t_rem = self.base_types - cur_types
-            if t_add or t_rem:
-                sig = ("type", frozenset(t_add), frozenset(t_rem))
+        if confirmed_added or confirmed_removed or type_arr or type_gone:
+            # transition signature: object arrivals/departures keyed at TYPE level (so "person
+            # leaves" recurring habituates); pure reconfiguration keyed at motif level.
+            if type_arr or type_gone:
+                sig = ("type", frozenset(type_arr), frozenset(type_gone))
             else:
                 sig = ("cfg", frozenset(confirmed_added), frozenset(confirmed_removed))
             change = math.exp(-self.beta * self.trans_counts.get(sig, 0.0))    # 1 first time -> 0 if recurring
@@ -385,14 +394,16 @@ class TemporalConfigGate:
             event = change >= self.threshold
             if event:
                 delta_added = [(m, 1) for m in confirmed_added]
-                left = sorted(self.base_types - cur_types)
-                arrived = sorted(cur_types - self.base_types)
+                left = sorted(type_gone)
+                arrived = sorted(type_arr)
                 chg = Counter()                                  # subject = most-changed node type
                 for m in confirmed_added + confirmed_removed:
                     chg.update(self._types_of(m))
+                for t in list(type_arr) + list(type_gone):
+                    chg[t] += 2
                 subject = chg.most_common(1)[0][0] if chg else None
             # commit the new state as baseline whether or not we reported it (the change happened)
-            self.baseline, self.base_types, self.absent, self.present = cur, cur_types, {}, {}
+            self.baseline, self.base_types, self.absent, self.present = cur, present_types, {}, {}
         d.update(event=event, delta_added=delta_added, left=left, arrived=arrived,
                  subject=subject, change=round(change, 3), armed=True)
         return d

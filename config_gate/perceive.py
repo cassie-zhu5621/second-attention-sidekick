@@ -99,6 +99,14 @@ class SceneGraph:
 NON_CONTAINER_TYPES = {"person", "people", "man", "woman", "boy", "girl", "child",
                        "hand", "cat", "dog", "bird", "animal"}
 
+# Only these plausibly CONTAIN other objects, so a 2D box-in-box means a real "inside". Anything
+# else that merely nests in 2D — a chair box swallowing a bag, a desk swallowing a laptop, one
+# chair box over another — is occlusion or stacking, NOT containment; we leave it to "on"/"near".
+# In a wide room almost nothing is truly inside anything, so this whitelist kills the false-
+# inside explosion while keeping the few real cases (a thing in a bag/box/cup).
+CONTAINER_TYPES = {"bag", "backpack", "handbag", "suitcase", "box", "basket", "bin", "drawer",
+                   "cabinet", "shelf", "bookshelf", "cup", "bowl", "pot", "jar", "container"}
+
 
 def build_graph(dets: List[Detection], image_wh: Tuple[int, int],
                 up: Optional[Tuple[float, float]] = None,
@@ -189,12 +197,13 @@ def build_graph(dets: List[Detection], image_wh: Tuple[int, int],
 
             # ---- rotation-INVARIANT relations (always safe) ----
             fi = _frac_inside(a.box, b.box)
-            # 'inside' only if b is a plausible CONTAINER, not a frame-filling foreground blob.
-            # Without depth, a big near object's box swallows everything behind it -> false
-            # 'inside'. Capping the container's size kills "monitor inside person" while keeping
-            # real containment (sticker in laptop, book in bag). True fix = depth (future).
-            if (fi >= 0.75 and b.area > a.area and b.area < max_container_frac * frame_area
-                    and b.label not in NON_CONTAINER_TYPES and dok(i, j)):
+            # 'inside' only if b is a WHITELISTED container type AND a is almost fully enclosed.
+            # Without depth, any big box swallows boxes behind it in 2D -> false 'inside' (chair
+            # in chair, laptop in desk, person in chair). Restricting to real containers + near-
+            # full enclosure + different type kills that explosion; everything else stays on/near.
+            if (fi >= 0.90 and a.label != b.label and b.label in CONTAINER_TYPES
+                    and b.area > a.area and b.area < max_container_frac * frame_area
+                    and dok(i, j)):
                 edges.append((ai, "inside", bi))
                 continue
             if overlapping and _iou(a.box, b.box) > 0.02 and i < j:
@@ -308,6 +317,91 @@ class YoloWorldDetector:
             x1, y1, x2, y2 = b.xyxy[0].tolist()
             out.append(Detection(names[int(b.cls)], (x1, y1, x2, y2), float(b.conf)))
         return out
+
+
+class YoloDetector:
+    """CLOSED-vocab YOLO (COCO-80). Fixed classes, but ROBUST when you 'place it anywhere':
+    it MISSES objects it doesn't know rather than force-fitting a wrong label onto them (which
+    is what an open-vocab model does on a mismatched prompt). Graceful degradation is safer for
+    the gate (a wrong+flickery box = a false structural event). No vocabulary needed.
+
+        pip install ultralytics      # weights auto-download on first use
+    """
+    def __init__(self, weights: str = "yolov8s.pt", conf: float = 0.3, device: str = None):
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise SystemExit("Closed YOLO needs ultralytics:  pip install ultralytics")
+        self.model = YOLO(weights)
+        self.conf = conf
+        self.device = device
+
+    def detect(self, image) -> List[Detection]:
+        r = self.model.predict(image, conf=self.conf, device=self.device, verbose=False)[0]
+        names = r.names
+        out = []
+        for b in r.boxes:
+            x1, y1, x2, y2 = b.xyxy[0].tolist()
+            out.append(Detection(names[int(b.cls)], (x1, y1, x2, y2), float(b.conf)))
+        return out
+
+
+class GroundingDinoDetector:
+    """Open-vocab Grounding DINO (HF transformers). More accurate / cleaner boxes than YOLO-World,
+    but MUCH slower (transformer + text encoder) — fine for the scanning rig (a few frames per
+    pose), likely too slow for a 30fps stream. Same .detect() interface.
+
+        pip install transformers
+        det = GroundingDinoDetector(["person","chair","desk","robot arm"])
+    """
+    def __init__(self, vocabulary: List[str], model="IDEA-Research/grounding-dino-tiny",
+                 conf: float = 0.3, device: str = None):
+        try:
+            import torch
+            from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+        except ImportError:
+            raise SystemExit("Grounding DINO needs transformers:  pip install transformers")
+        if device is None:
+            device = ("mps" if torch.backends.mps.is_available()
+                      else "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
+        self.conf = conf
+        self.proc = AutoProcessor.from_pretrained(model)
+        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(model).to(device)
+        # GD wants lowercase phrases separated by ". "; remember the order to map labels back.
+        self.vocab = [v.strip().lower() for v in vocabulary]
+        self.prompt = ". ".join(self.vocab) + "."
+        print(f"[detector] Grounding DINO ({model}) on {device}")
+
+    def detect(self, image) -> List[Detection]:
+        import torch, cv2
+        from PIL import Image
+        H, W = image.shape[:2]
+        pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        inputs = self.proc(images=pil, text=self.prompt, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        res = self.proc.post_process_grounded_object_detection(
+            outputs, inputs.input_ids, box_threshold=self.conf, text_threshold=self.conf,
+            target_sizes=[(H, W)])[0]
+        out = []
+        for box, score, label in zip(res["boxes"], res["scores"], res["labels"]):
+            x1, y1, x2, y2 = [float(v) for v in box.tolist()]
+            lab = (label or "").strip() or "object"          # GD may return a phrase
+            out.append(Detection(lab.split()[0] if lab else "object", (x1, y1, x2, y2), float(score)))
+        return out
+
+
+def make_detector(kind: str, vocabulary: List[str], conf: float = 0.3, device: str = None):
+    """Factory so callers can swap detectors with one flag. kind in {yoloworld, yolo, gdino}."""
+    kind = (kind or "yoloworld").lower()
+    if kind in ("yoloworld", "world", "yw"):
+        return YoloWorldDetector(vocabulary, conf=conf, device=device)
+    if kind in ("yolo", "coco", "closed"):
+        return YoloDetector(conf=conf, device=device)
+    if kind in ("gdino", "groundingdino", "dino", "gd"):
+        return GroundingDinoDetector(vocabulary, conf=conf, device=device)
+    raise SystemExit(f"unknown --detector '{kind}' (use: yoloworld | yolo | gdino)")
 
 
 if __name__ == "__main__":

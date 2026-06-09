@@ -26,7 +26,7 @@ from config_surprise import ConfigSurpriseGate, TemporalConfigGate
 from judge import judge as run_judge, ReportabilityTaste, AXES
 from viz import draw_overlay
 
-STATE = {"jpg": None, "feed": [], "taste": ReportabilityTaste()}
+STATE = {"jpg": None, "feed": [], "taste": ReportabilityTaste(), "thumbs": {}}
 LOCK = threading.Lock()
 ARGS = None
 
@@ -217,11 +217,16 @@ class H(BaseHTTPRequestHandler):
                 data = {"weights": t.weights, "about": t.about}
             self._send(200, "application/json", json.dumps(data).encode())
         elif p.startswith("/thumb/"):
-            fn = os.path.join(ARGS.feed_dir, os.path.basename(p[7:]))
-            if os.path.exists(fn):
-                self._send(200, "image/jpeg", open(fn, "rb").read())
+            name = os.path.basename(p[7:])
+            mem = STATE.get("thumbs", {}).get(name)               # in-memory (test/--no-save) first
+            if mem is not None:
+                self._send(200, "image/jpeg", mem)
             else:
-                self._send(404, "text/plain", b"")
+                fn = os.path.join(ARGS.feed_dir, name)
+                if os.path.exists(fn):
+                    self._send(200, "image/jpeg", open(fn, "rb").read())
+                else:
+                    self._send(404, "text/plain", b"")
         else:
             self._send(404, "text/plain", b"")
 

@@ -18,6 +18,7 @@
 | 可报告性的具体轴 (people/relevance/consequence/continuity) | 什么算"值得报道" | **News values** — Galtung & Ruge 1965; Harcup & O'Neill 2001/2017 | 可引(我们做了向"个体化/情境化"的改写——这是贡献) |
 | **cheap-gate → VLM 的两段式** | 用便宜信号选择性触发昂贵 VLM | **Bu & Ju et al. 2025** (arXiv:2512.07177, HRI,最近邻,需区分);**ColorTrigger 2026**(常开廉价触发) | 相邻工作,需对比 |
 | 委派注意力 / 安置式陪伴 (HCI 框架) | 把"留意"委派给一个放置式有 taste 的伙伴 | SenseCam (Hodges et al.); "total capture" 批评 (Sellen & Whittaker, CACM 2010); Slow Technology (Hallnäs & Redström); Research Products / Photobox (Odom, CHI'14/'16); Calm Tech (Weiser & Brown); Mixed-Initiative (Horvitz CHI'99); Google Clips(无理论先例,对比项) | HCI 谱系,related work |
+| **装置=社会行动者** (motivation + 动作/报告设计) | 人会自动、无意识地把会看会动的装置当社会行动者对待;"看起来在恰当注意"比 CV 精度更重要("what seems true > what is true","respond to what is present");会动/朝向是社会线索;得体报告 = Gricean **Quantity**(习惯化门控防刷屏)+ **Relevance**(可改写 taste 由用户掌控);委派=队友(interdependence) | **The Media Equation** — Reeves & Nass 1996;**Nass & Moon 2000** (*Machines and Mindlessness*, 自动社会反应);**Nass, Fogg & Moon 1996** (computers as teammates);Grice 1975 (maxims) | 核心 framing 引用(与 tellability/news-values 互补:那套=什么值得报,这套=为何被当社会行动者+如何得体地报) |
 | 当代定位(说明方向正热、且占 placed+noticing 空位) | — | Vinci (IMWUT'25), EgoLife (CVPR'25), SensibleAgent (UIST'25), proactive agents (CHI'25), always-on 隐私 (WatchThis UIST'24) | 当代 related work |
 | **未来:自扩展词表** | 从少数常见词出发,自动发现并纳入新物体 | **Open-World Object Detection** — Joseph et al., CVPR 2021 (ORE);open-vocab: YOLO-World (Cheng et al. CVPR'24), Grounding DINO | 未来工作,可引 |
 

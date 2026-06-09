@@ -22,7 +22,7 @@ const int TILT_PIN = 10;
 const int PAN_CENTER  = 90;
 const int TILT_CENTER = 90;
 const int PAN_MIN = 30,  PAN_MAX = 150;
-const int TILT_MIN = 55, TILT_MAX = 125;
+const int TILT_MIN = 55, TILT_MAX = 135;   // raised from 125: camera mounted tilted up, need more DOWN travel
 
 const int STEP_MS = 12;                 // glide pace
 const unsigned long IDLE_MS = 4000;     // relax servos after this much idle

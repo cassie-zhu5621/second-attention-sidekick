@@ -47,20 +47,22 @@ def make_detector(args):
     if args.mock:
         print("[--mock] using demo boxes (NO real detector). On your machine drop --mock.")
         return _DemoDetector()
-    from perceive import YoloWorldDetector
+    from perceive import make_detector as build
     vocab = [v.strip() for v in args.vocab.split(",")] if args.vocab else DEFAULT_VOCAB
-    print(f"[detector] YOLO-World ({args.weights}), {len(vocab)} classes, conf={args.conf}, "
+    print(f"[detector] {args.detector}, {len(vocab)} classes, conf={args.conf}, "
           f"device={args.device or 'auto'}")
-    return YoloWorldDetector(vocab, weights=args.weights, conf=args.conf, device=args.device)
+    return build(args.detector, vocab, conf=args.conf, device=args.device)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--images", required=True, help="folder of frames")
     ap.add_argument("--out", default=None, help="output folder (default: <images>/_perception)")
+    ap.add_argument("--detector", default="yoloworld",
+                    help="yoloworld | yolo (closed COCO-80) | gdino (Grounding DINO)")
     ap.add_argument("--vocab", default=",".join(DEFAULT_VOCAB))
     ap.add_argument("--weights", default="yolov8s-world.pt")
-    ap.add_argument("--conf", type=float, default=0.25)
+    ap.add_argument("--conf", type=float, default=0.3)
     ap.add_argument("--near-frac", type=float, default=0.18)
     ap.add_argument("--min-score", type=float, default=0.30)
     ap.add_argument("--surface-frac", type=float, default=0.33)

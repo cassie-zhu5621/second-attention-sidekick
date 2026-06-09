@@ -23,8 +23,8 @@
 #include "esp_camera.h"
 
 // ======================= EDIT THESE =======================
-const char* ssid     = "YOUR_WIFI";        // <-- set per network, then RE-FLASH
-const char* password = "YOUR_PASSWORD";    // <-- set per network, then RE-FLASH
+const char* ssid     = "Cassiebot";        // <-- set per network, then RE-FLASH
+const char* password = "00000799";    // <-- set per network, then RE-FLASH
 const char* HOSTNAME = "sidekick-loop";    // loop cam = "sidekick-loop"; collector cam = "sidekick-cam"
 // ==========================================================
 
