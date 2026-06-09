@@ -68,6 +68,12 @@ def main():
     ap.add_argument("--up", default=None, help="'ux,uy' up-vector if camera orientation is known")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--device", default=None, help="None=auto, 'cpu', or '0' for first GPU")
+    ap.add_argument("--with-overlapping", action="store_true",
+                    help="re-enable the 'overlapping' relation (off by default: it's ~57%% "
+                         "depth-occlusion bloat)")
+    ap.add_argument("--min-area", type=float, default=0.0,
+                    help="ignore objects smaller than this fraction of the frame "
+                         "(e.g. 0.015 in a cluttered/far scene; ~0 for a close single desk)")
     ap.add_argument("--mock", action="store_true")
     args = ap.parse_args()
 
@@ -91,7 +97,8 @@ def main():
         H, W = img.shape[:2]
         dets = det.detect(img)
         g = build_graph(dets, (W, H), up=up, near_frac=args.near_frac, min_score=args.min_score,
-                        surface_frac=args.surface_frac, surface_min_holds=args.surface_min_holds)
+                        surface_frac=args.surface_frac, surface_min_holds=args.surface_min_holds,
+                        overlapping=args.with_overlapping, min_area_frac=args.min_area)
         cap = f"{len(g.nodes)} objects, {len(g.edges)} relations"
         ann = draw_overlay(img, g, caption=cap)
         name = os.path.splitext(os.path.basename(fp))[0]

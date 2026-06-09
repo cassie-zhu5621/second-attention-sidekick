@@ -2,14 +2,12 @@
 viz.py — the GLASS-BOX overlay: draw the whole pipeline's state onto the live frame.
 
 This is the "compilable / readable" surface: for every frame you can SEE, on top of the
-real image, exactly what the system perceived and decided —
-    detected boxes · the geometric relations · which big thing was called a surface ·
-    whether the gate fired · and the VLM's worth / why / field note.
+real image, exactly what the system perceived and decided — detected boxes, the geometric
+relations, which big thing was called a surface, whether the gate fired, and the VLM's
+worth / why / field note.
 
-It is detector-agnostic: you hand it the frame, the SceneGraph from perceive(), and a small
-`state` dict (the cheap-gate flags + gate decision + judge result). In the live loop you call
-draw_overlay() each tick and either cv2.imshow() it, write it to disk, or push it to the web
-panel — so one screen shows every stage in real time.
+Styled for a clear REAL-TIME UI: bright/neon colours + black-outlined text so labels read on
+any background (inspired by sports/AR overlays). Shared by the offline batch and live_demo.
 """
 
 from __future__ import annotations
@@ -17,49 +15,55 @@ import cv2
 import numpy as np
 from typing import Optional
 
-# relation -> BGR colour (OpenCV is BGR)
+FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+# relation -> BGR colour — bright/neon for a clear real-time UI (OpenCV is BGR)
 REL_COLOR = {
-    "near":        (235, 99, 37),    # blue   — image-plane proximity
-    "overlapping": (12, 65, 194),    # orange — image overlap (occlusion, NOT 3D contact)
-    "inside":      (237, 58, 124),   # purple — image containment
-    "on":          (110, 118, 15),   # teal   — within a surface region (depth-blind)
-    "above": (160,160,160), "below": (160,160,160),
-    "left_of": (160,160,160), "right_of": (160,160,160),
+    "near":        (255, 255, 0),    # cyan
+    "inside":      (255, 0, 255),    # magenta
+    "on":          (0, 255, 255),    # yellow
+    "overlapping": (0, 140, 255),    # orange (off by default)
+    "above": (255, 255, 255), "below": (255, 255, 255),
+    "left_of": (255, 255, 255), "right_of": (255, 255, 255),
 }
 _SYMMETRIC = {"near", "overlapping"}
+BOX_COLOR = (0, 255, 0)              # neon-green object boxes (like the reference skeleton)
+SURF_COLOR = (255, 255, 0)          # cyan surface highlight
 
 
 def _ctr(b):
     return (int((b[0] + b[2]) / 2), int((b[1] + b[3]) / 2))
 
 
+def _text(img, s, org, color, scale=0.7, thick=2):
+    """Neon-style label: thick black outline + bright fill, readable on any background."""
+    cv2.putText(img, s, org, FONT, scale, (0, 0, 0), thick + 3, cv2.LINE_AA)
+    cv2.putText(img, s, org, FONT, scale, color, thick, cv2.LINE_AA)
+
+
 def draw_overlay(img: np.ndarray, g, state: Optional[dict] = None,
                  caption: Optional[str] = None) -> np.ndarray:
     """Return a copy of `img` annotated with the scene graph + pipeline state.
     g: a SceneGraph (needs .nodes, .edges, .boxes, optional .surfaces).
-    state: optional {settled, changed, event, worth, why, note} -> draws the full pipeline HUD.
+    state: optional {settled, changed, event, worth, why, note} -> draws the full HUD.
     caption: optional one-line text drawn top-left (used by the perception-only batch)."""
     out = img.copy()
     H, W = out.shape[:2]
     surfaces = set(getattr(g, "surfaces", []))
     if caption:
-        (tw, th), _ = cv2.getTextSize(caption, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-        cv2.rectangle(out, (0, 0), (tw + 20, th + 18), (20, 22, 25), -1)
-        cv2.putText(out, caption, (10, th + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                    (230, 230, 230), 2, cv2.LINE_AA)
+        _text(out, caption, (12, 32), (255, 255, 255), 0.7, 2)
 
-    # 1) surface highlight (translucent teal fill + label)
+    # 1) surface: bright translucent fill + border + label
     for sid in surfaces:
         if sid in g.boxes:
             x1, y1, x2, y2 = map(int, g.boxes[sid])
             layer = out.copy()
-            cv2.rectangle(layer, (x1, y1), (x2, y2), (110, 118, 15), -1)
-            cv2.addWeighted(layer, 0.10, out, 0.90, 0, out)
-            cv2.rectangle(out, (x1, y1), (x2, y2), (110, 118, 15), 2)
-            cv2.putText(out, f"{g.nodes.get(sid, sid)} [surface]", (x1 + 6, y1 + 28),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (110, 118, 15), 2)
+            cv2.rectangle(layer, (x1, y1), (x2, y2), SURF_COLOR, -1)
+            cv2.addWeighted(layer, 0.12, out, 0.88, 0, out)
+            cv2.rectangle(out, (x1, y1), (x2, y2), SURF_COLOR, 2, cv2.LINE_AA)
+            _text(out, f"{g.nodes.get(sid, sid)} [surface]", (x1 + 8, y1 + 30), SURF_COLOR, 0.7, 2)
 
-    # 2) relation edges (dedupe symmetric; draw line + label at midpoint)
+    # 2) relation edges (dedupe symmetric; bright line + outlined label at midpoint)
     drawn = set()
     for (a, rel, b) in g.edges:
         key = (frozenset((a, b)), rel) if rel in _SYMMETRIC else (a, rel, b)
@@ -69,50 +73,38 @@ def draw_overlay(img: np.ndarray, g, state: Optional[dict] = None,
         if a not in g.boxes or b not in g.boxes:
             continue
         pa, pb = _ctr(g.boxes[a]), _ctr(g.boxes[b])
-        col = REL_COLOR.get(rel, (180, 180, 180))
-        thick = 1 if rel == "on" else 3
-        cv2.line(out, pa, pb, col, thick, cv2.LINE_AA)
+        col = REL_COLOR.get(rel, (220, 220, 220))
+        cv2.line(out, pa, pb, col, 2, cv2.LINE_AA)
         mx, my = (pa[0] + pb[0]) // 2, (pa[1] + pb[1]) // 2
-        (tw, th), _ = cv2.getTextSize(rel, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-        cv2.rectangle(out, (mx - 3, my - th - 4), (mx + tw + 3, my + 4), (255, 255, 255), -1)
-        cv2.putText(out, rel, (mx, my), cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2, cv2.LINE_AA)
+        _text(out, rel, (mx - 4, my), col, 0.55, 2)
 
-    # 3) object boxes (non-surface) + label
+    # 3) object boxes (non-surface) + neon label
     for nid, box in g.boxes.items():
         if nid in surfaces:
             continue
         x1, y1, x2, y2 = map(int, box)
-        cv2.rectangle(out, (x1, y1), (x2, y2), (40, 40, 40), 2)
-        cv2.circle(out, _ctr(box), 4, (40, 40, 40), -1)
-        cv2.putText(out, g.nodes.get(nid, nid), (x1 + 3, max(y1 - 6, 16)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 4, cv2.LINE_AA)
-        cv2.putText(out, g.nodes.get(nid, nid), (x1 + 3, max(y1 - 6, 16)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (20, 20, 20), 2, cv2.LINE_AA)
+        cv2.rectangle(out, (x1, y1), (x2, y2), BOX_COLOR, 2, cv2.LINE_AA)
+        cv2.circle(out, _ctr(box), 4, BOX_COLOR, -1)
+        _text(out, g.nodes.get(nid, nid), (x1 + 4, max(y1 - 8, 22)), BOX_COLOR, 0.7, 2)
 
-    # 4) HUD: the pipeline stages, bottom strip
+    # 4) HUD: clean real-time status strip + a NOTICED chip on fire
     if state is not None:
-        bar_h = 150
+        bar = 132
         layer = out.copy()
-        cv2.rectangle(layer, (0, H - bar_h), (W, H), (20, 22, 25), -1)
-        cv2.addWeighted(layer, 0.78, out, 0.22, 0, out)
-        def ok(v): return "OK" if v else "--"
+        cv2.rectangle(layer, (0, H - bar), (W, H), (18, 18, 20), -1)
+        cv2.addWeighted(layer, 0.62, out, 0.38, 0, out)
         ev = state.get("event")
-        gate_txt = "EVENT (new configuration)" if ev else "habituated / no new config"
-        gate_col = (90, 240, 120) if ev else (140, 140, 140)
-        y = H - bar_h + 30
-        cv2.putText(out, f"(1)stillness {ok(state.get('settled',True))}   "
-                         f"(2)changed-here {ok(state.get('changed',True))}",
-                    (16, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (230, 230, 230), 2)
-        cv2.putText(out, f"(3)gate: {gate_txt}", (16, y + 34),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, gate_col, 2)
-        w = state.get("worth"); why = state.get("why", "")
+        def ok(v): return "OK" if v else "--"
+        _text(out, f"stillness {ok(state.get('settled', True))}    changed {ok(state.get('changed', True))}",
+              (16, H - bar + 34), (235, 235, 235), 0.7, 2)
+        _text(out, "GATE: EVENT (new configuration)" if ev else "GATE: habituated",
+              (16, H - bar + 72), (0, 255, 0) if ev else (165, 165, 165), 0.78, 2)
+        w = state.get("worth")
         if w is not None:
-            cv2.putText(out, f"(4)judge: worth={w:.2f}  why={why}", (16, y + 68),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (120, 200, 255), 2)
-        note = state.get("note", "")
-        if note:
-            cv2.putText(out, f'    "{note[:70]}"', (16, y + 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.62, (220, 220, 220), 2)
+            _text(out, f'worth {w:.2f}  ({state.get("why", "")})  "{state.get("note", "")[:44]}"',
+                  (16, H - bar + 106), (0, 255, 255), 0.6, 2)
+        if ev:
+            _text(out, ">> NOTICED", (W - 270, 48), (0, 255, 0), 0.95, 3)
     return out
 
 
@@ -134,7 +126,6 @@ if __name__ == "__main__":
                      "cap_20260604_112241_0.85.jpg")
     img = cv2.imread(path)
     H, W = img.shape[:2]
-    # boxes eyeballed from this real frame (stand-in for the detector's output)
     dets = [
         Detection("person",      (40, 430, 470, 1180)),
         Detection("laptop",      (980, 250, 1600, 1140)),
@@ -145,7 +136,7 @@ if __name__ == "__main__":
         Detection("breadboard",  (120, 0, 430, 210)),
     ]
     g = build_graph(dets, (W, H))
-    r = judge(None, g, ReportabilityTaste())     # offline -> a sample worth/why/note
+    r = judge(None, g, ReportabilityTaste())
     state = {"settled": True, "changed": True, "event": True,
              "worth": r["worth"], "why": r["why"], "note": r["note"]}
     out = draw_overlay(img, g, state)

@@ -20,3 +20,14 @@ build/
 **/_perception/
 live_captures/
 *.png
+
+# Model weights — downloadable, too big for git (GitHub rejects >100MB)
+*.pt
+*.pth
+*.onnx
+config_gate/weights/
+config_gate/yolov8s-world.pt
+
+# Runtime feed / logs (config_gate)
+config_gate/feed/
+*.jsonl

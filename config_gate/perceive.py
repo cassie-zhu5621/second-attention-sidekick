@@ -93,10 +93,20 @@ class SceneGraph:
         return self.nodes, self.edges
 
 
+# Movers/agents are never a SURFACE or a CONTAINER — a person carries/sits, they don't hold
+# things "inside" or serve as a surface. Without depth, a big foreground person's box swallows
+# everything behind it -> false "X inside/on person"; blacklisting these types kills that.
+NON_CONTAINER_TYPES = {"person", "people", "man", "woman", "boy", "girl", "child",
+                       "hand", "cat", "dog", "bird", "animal"}
+
+
 def build_graph(dets: List[Detection], image_wh: Tuple[int, int],
                 up: Optional[Tuple[float, float]] = None,
                 near_frac: float = 0.18, min_score: float = 0.30,
-                surface_frac: float = 0.33, surface_min_holds: int = 3) -> SceneGraph:
+                surface_frac: float = 0.33, surface_min_holds: int = 3,
+                overlapping: bool = False, min_area_frac: float = 0.0,
+                max_container_frac: float = 0.5,
+                depth_map=None, depth_tol: float = 0.15) -> SceneGraph:
     """Detections -> stable scene graph.
 
     near_frac: two objects are 'near' if their centre distance < near_frac * image diagonal.
@@ -114,7 +124,12 @@ def build_graph(dets: List[Detection], image_wh: Tuple[int, int],
     W, H = image_wh
     diag = math.hypot(W, H)
     frame_area = max(W * H, 1)
-    dets = [d for d in dets if d.score >= min_score]
+    # drop low-confidence AND too-small detections. Small boxes (a distant bottle) are the
+    # least stable to detect (they flicker in/out frame to frame -> phantom relation changes)
+    # and the least relationally important, so for the GATE we ignore objects below
+    # min_area_frac of the frame. This is a per-deployment knob: raise it in a cluttered/far
+    # scene (a shared room), keep it ~0 for a close simple scene (a single desk).
+    dets = [d for d in dets if d.score >= min_score and d.area >= min_area_frac * frame_area]
 
     # assign stable-ish ids: type + an index by reading order (left->right, top->bottom).
     dets = sorted(dets, key=lambda d: (round(d.cy / max(H, 1), 2), d.cx))
@@ -130,11 +145,32 @@ def build_graph(dets: List[Detection], image_wh: Tuple[int, int],
     # --- identify surfaces (data-driven) ---
     is_surface = [False] * len(dets)
     for k, s in enumerate(dets):
-        if s.area >= surface_frac * frame_area:
+        if s.area >= surface_frac * frame_area and s.label not in NON_CONTAINER_TYPES:
             holds = sum(1 for m, o in enumerate(dets)
                         if m != k and _frac_inside(o.box, s.box) >= 0.5 and o.area < s.area)
             if holds >= surface_min_holds:
                 is_surface[k] = True
+
+    # per-detection median depth (0..1) if a depth map was supplied (monocular Depth-Anything).
+    # Two boxes are only "inside/on"-related if they are at a SIMILAR depth — a thing BEHIND a
+    # big foreground object is at a different depth, so it is NOT contained/supported by it.
+    # This is the principled replacement for the size-cap / person-blacklist band-aids.
+    import numpy as _np
+    def _bd(box):
+        if depth_map is None:
+            return None
+        H2, W2 = depth_map.shape[:2]
+        x1, y1, x2, y2 = (max(0, int(box[0])), max(0, int(box[1])),
+                          min(W2, int(box[2])), min(H2, int(box[3])))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return float(_np.median(depth_map[y1:y2, x1:x2]))
+    depth_of = [_bd(d.box) for d in dets]
+    def dok(i, j):                       # depth-consistent? (always True when no depth map)
+        if depth_map is None:
+            return True
+        di, dj = depth_of[i], depth_of[j]
+        return di is not None and dj is not None and abs(di - dj) <= depth_tol
 
     edges: List[Tuple[str, str, str]] = []
     for i in range(len(dets)):
@@ -146,21 +182,27 @@ def build_graph(dets: List[Detection], image_wh: Tuple[int, int],
 
             # ---- surface handling: only 'X on surface', nothing else ----
             if is_surface[i] or is_surface[j]:
-                if is_surface[j] and not is_surface[i] and _frac_inside(a.box, b.box) >= 0.5:
-                    edges.append((ai, "on", bi))          # a sits on surface b
+                if (is_surface[j] and not is_surface[i]
+                        and _frac_inside(a.box, b.box) >= 0.5 and dok(i, j)):
+                    edges.append((ai, "on", bi))          # a sits on surface b (same depth)
                 continue                                   # suppress all other surface edges
 
             # ---- rotation-INVARIANT relations (always safe) ----
             fi = _frac_inside(a.box, b.box)
-            if fi >= 0.75 and b.area > a.area:
+            # 'inside' only if b is a plausible CONTAINER, not a frame-filling foreground blob.
+            # Without depth, a big near object's box swallows everything behind it -> false
+            # 'inside'. Capping the container's size kills "monitor inside person" while keeping
+            # real containment (sticker in laptop, book in bag). True fix = depth (future).
+            if (fi >= 0.75 and b.area > a.area and b.area < max_container_frac * frame_area
+                    and b.label not in NON_CONTAINER_TYPES and dok(i, j)):
                 edges.append((ai, "inside", bi))
                 continue
-            if _iou(a.box, b.box) > 0.02 and i < j:
-                # NB: 2D box overlap is NOT physical contact — usually it's just depth
-                # occlusion (a foot in front of a desk, a person before a window). So we name
-                # it honestly: 'overlapping' (image-plane fact), never 'touching'. Real
-                # physical relations (touching/holding/sitting-on) are the VLM's job at
-                # report time; the gate only needs a STABLE spatial encoding, which this is.
+            if overlapping and _iou(a.box, b.box) > 0.02 and i < j:
+                # OFF by default: on real lab data 'overlapping' was ~57% of all edges and
+                # mostly depth OCCLUSION (a chair in front of a desk/person), not contact —
+                # it bloated the graph 2x while barely changing what the gate fired on. We
+                # keep near/inside/on (the meaningful spatial structure) and let the VLM
+                # supply true physical relations at report time. Re-enable with overlapping=True.
                 edges.append((ai, "overlapping", bi)); edges.append((bi, "overlapping", ai))
             dist = math.hypot(a.cx - b.cx, a.cy - b.cy)
             if i < j and dist < near_frac * diag and _iou(a.box, b.box) == 0:
