@@ -31,3 +31,7 @@ config_gate/yolov8s-world.pt
 # Runtime feed / logs (config_gate)
 config_gate/feed/
 *.jsonl
+
+# recordings & perception outputs
+*.mp4
+**/_perception*/

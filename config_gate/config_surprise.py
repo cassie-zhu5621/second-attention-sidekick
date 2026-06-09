@@ -311,40 +311,105 @@ class TemporalConfigGate:
     This is the cheap step-3 gate that decides whether to spend the expensive step-4 VLM
     call, and packages the call's input."""
     gate: ConfigSurpriseGate = field(default_factory=ConfigSurpriseGate)
-    refractory: int = 1                  # frames of 'known' needed to re-arm after an event
-    armed: bool = True
-    last_stable: Counter = field(default_factory=Counter)
-    _quiet_run: int = 0
+    persist: int = 2                     # a change must hold this many frames to be 'confirmed'
+    threshold: float = 0.5
+    decay: float = 0.98                  # how fast a recurring transition habituates
+    beta: float = 1.0
+    window: int = 8                      # rolling window for type-presence stability
+    stable_frac: float = 0.6             # a type is 'stable' if present in >= this frac of window
+    baseline: set = field(default_factory=set)        # last COMMITTED settled config (frozen)
+    base_types: set = field(default_factory=set)
+    absent: dict = field(default_factory=dict)        # baseline motif -> consecutive frames absent
+    present: dict = field(default_factory=dict)       # non-baseline motif -> consecutive frames present
+    trans_counts: Counter = field(default_factory=Counter)   # habituation over TRANSITIONS
+    _twin: dict = field(default_factory=dict)         # type -> deque of recent present(1)/absent(0)
+
+    @staticmethod
+    def _types_of(m):
+        if m[0] == "E": return (m[1], m[3])
+        if m[0] == "P": return (m[1], m[3], m[5])
+        return (m[1],)
 
     def step(self, nodes: Dict[Node, str], edges: List[Edge]) -> dict:
-        d = self.gate.step(nodes, edges)
+        d = self.gate.step(nodes, edges)         # keeps the config-prior habituating; gives bag/top
         bag = d["bag"]
-        event = False
-        delta_added = []
-        if d["fire"]:
-            if self.armed:
-                event = True
-                self.armed = False
-                # what is structurally new vs the last settled configuration
-                delta_added = [(m, c) for m, c in bag.items() if m not in self.last_stable]
-            self._quiet_run = 0
-        else:
-            self._quiet_run += 1
-            if self._quiet_run >= self.refractory:
-                self.armed = True
-                self.last_stable = bag          # this calm configuration is the new baseline
-        d.update(event=event, delta_added=delta_added, armed=self.armed)
+        cur = set(bag)
+        cur_types = set(nodes.values())
+        if not self.baseline:                    # first frame: adopt as baseline, no event
+            self.baseline, self.base_types = cur, cur_types
+            d.update(event=False, delta_added=[], left=[], arrived=[], subject=None, change=0.0)
+            return d
+
+        # The EVENT is a persistent STRUCTURAL CHANGE vs the committed baseline (add OR remove —
+        # so departures, arrivals AND returns all count). Flicker is filtered by `persist`. Then
+        # HABITUATION is applied to the TRANSITION itself: the FIRST time a given change happens
+        # it fires; if the SAME transition (e.g. this person leaving) recurs, its count rises and
+        # it is optimised away (boredom). Pure structure; one mechanism; no novelty/type layer.
+        # per-type rolling presence -> only STABLE types count (kills background detector flicker,
+        # e.g. a bookshelf/desk flickering in&out or being briefly occluded; saves wasted VLM calls).
+        for t in set(self._twin) | cur_types:
+            dq = self._twin.setdefault(t, deque(maxlen=self.window))
+            dq.append(1 if t in cur_types else 0)
+        def stable(t):
+            dq = self._twin.get(t)
+            return bool(dq) and sum(dq) >= self.stable_frac * dq.maxlen
+        def motif_stable(m):
+            return all(stable(t) for t in self._types_of(m))
+
+        for m in cur:
+            self.present[m] = self.present.get(m, 0) + 1
+        for m in [k for k in self.present if k not in cur]:
+            del self.present[m]
+        for m in self.baseline:
+            self.absent[m] = 0 if m in cur else self.absent.get(m, 0) + 1
+        confirmed_added = [m for m in cur if m not in self.baseline
+                           and self.present.get(m, 0) >= self.persist and motif_stable(m)]
+        confirmed_removed = [m for m in self.baseline
+                             if self.absent.get(m, 0) >= self.persist and motif_stable(m)]
+
+        event, delta_added, left, arrived, subject, change = False, [], [], [], None, 0.0
+        if confirmed_added or confirmed_removed:
+            # transition signature: arrivals/departures keyed at TYPE level (so "person leaves"
+            # recurring habituates), pure reconfiguration keyed at motif level (distinct rewirings
+            # each get their own first-time fire).
+            t_add = cur_types - self.base_types
+            t_rem = self.base_types - cur_types
+            if t_add or t_rem:
+                sig = ("type", frozenset(t_add), frozenset(t_rem))
+            else:
+                sig = ("cfg", frozenset(confirmed_added), frozenset(confirmed_removed))
+            change = math.exp(-self.beta * self.trans_counts.get(sig, 0.0))    # 1 first time -> 0 if recurring
+            for k in list(self.trans_counts):                                  # habituate transitions
+                self.trans_counts[k] *= self.decay
+            self.trans_counts[sig] += 1
+            event = change >= self.threshold
+            if event:
+                delta_added = [(m, 1) for m in confirmed_added]
+                left = sorted(self.base_types - cur_types)
+                arrived = sorted(cur_types - self.base_types)
+                chg = Counter()                                  # subject = most-changed node type
+                for m in confirmed_added + confirmed_removed:
+                    chg.update(self._types_of(m))
+                subject = chg.most_common(1)[0][0] if chg else None
+            # commit the new state as baseline whether or not we reported it (the change happened)
+            self.baseline, self.base_types, self.absent, self.present = cur, cur_types, {}, {}
+        d.update(event=event, delta_added=delta_added, left=left, arrived=arrived,
+                 subject=subject, change=round(change, 3), armed=True)
         return d
 
     @staticmethod
-    def describe(delta_added, top) -> str:
+    def describe(delta_added, top, left=None, arrived=None) -> str:
         """A compact, human-readable 'what changed' for logs / the VLM prompt."""
         def fmt(m):
             if m[0] == "E": return f"{m[1]}-{m[2]}->{m[3]}"
             if m[0] == "P": return f"{m[1]}-{m[2]}->{m[3]}-{m[4]}->{m[5]}"
             return f"({m[2][0]}-{m[2][1]}->{m[2][2]}) + ({m[3][0]}-{m[3][1]}->{m[3][2]})"
+        parts = []
+        if arrived: parts.append("arrived: " + ", ".join(arrived))
+        if left:    parts.append("left: " + ", ".join(left))
         new = [fmt(m) for m, _ in delta_added] or [fmt(m) for m, _ in top]
-        return "new structure: " + "; ".join(new[:4])
+        if new: parts.append("new structure: " + "; ".join(new[:3]))
+        return " | ".join(parts) if parts else "configuration changed"
 
 
 if __name__ == "__main__":

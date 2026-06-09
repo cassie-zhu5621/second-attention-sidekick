@@ -23,7 +23,7 @@ import argparse, json, os, sys, threading, time
 import cv2
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
-from perceive import build_graph, YoloWorldDetector
+from perceive import build_graph, YoloWorldDetector, StaticLatch
 from config_surprise import ConfigSurpriseGate, TemporalConfigGate
 from viz import draw_overlay
 
@@ -108,6 +108,7 @@ def main():
         print("[depth] Depth-Anything on — relations gated by depth consistency")
     gate = TemporalConfigGate(gate=ConfigSurpriseGate(mode="habituation", agg="max",
                                                       threshold=args.threshold))
+    latch = StaticLatch()                    # immovable objects stay put (no flicker events)
     taste = None
     if args.judge:
         from judge import judge as run_judge, ReportabilityTaste
@@ -155,7 +156,9 @@ def main():
             changed = cv2.absdiff(gray, prev_gray).mean() > args.change_thr
         prev_gray = gray
 
-        g = build_graph(det.detect(fr), (W, H), min_area_frac=args.min_area)
+        dmap = depth_model.predict(fr) if depth_model is not None else None
+        g = build_graph(latch.apply(det.detect(fr), (W, H)), (W, H),
+                        min_area_frac=args.min_area, depth_map=dmap)
         dec = gate.step(*g.as_gate_input())
         event = bool(dec["event"] and changed)
         state = {"settled": True, "changed": changed, "event": event}

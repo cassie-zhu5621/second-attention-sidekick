@@ -233,6 +233,45 @@ def perceive(image, detector: Detector, image_wh: Tuple[int, int],
 # --------------------------------------------------------------------------- #
 # detector adapters
 # --------------------------------------------------------------------------- #
+# obviously-immovable categories: once detected at a spot, LATCH them there so the detector
+# missing them for a few frames doesn't fake a "left/arrived" event. They can't actually move.
+STATIC_TYPES = {"desk", "table", "chair", "bookshelf", "shelf", "cabinet", "monitor", "tv",
+                "screen", "potted plant", "plant", "sofa", "couch", "bed", "lamp", "whiteboard",
+                "window", "door", "refrigerator", "sink", "oven"}
+
+
+class StaticLatch:
+    """Stabilises detection of immovable objects. Once a static-type object is seen at a location
+    it is remembered (per type + coarse cell); if the detector misses it on later frames, its last
+    box is re-injected. So furniture/plants/monitors stop flickering in&out — only genuinely
+    movable things (person, cup, bag, laptop...) drive add/remove events.
+      latch = StaticLatch();  dets = latch.apply(det.detect(frame), (W, H))
+    A latched object is dropped only if unseen for `forget` frames (it really may have been moved)."""
+    def __init__(self, static=STATIC_TYPES, grid=12, forget=400):
+        self.static, self.grid, self.forget = static, grid, forget
+        self.latched = {}   # (type, cell) -> [Detection, last_seen_step]
+        self._step = 0
+
+    def apply(self, dets, image_wh):
+        self._step += 1
+        W, H = image_wh
+        def cell(b): return (int((b[0]+b[2])/2 / max(W, 1) * self.grid),
+                             int((b[1]+b[3])/2 / max(H, 1) * self.grid))
+        present = set()
+        for d in dets:
+            if d.label in self.static:
+                key = (d.label, cell(d.box))
+                self.latched[key] = [d, self._step]
+                present.add(key)
+        out = list(dets)
+        for key, (d, seen) in list(self.latched.items()):
+            if self._step - seen > self.forget:
+                del self.latched[key]
+            elif key not in present:
+                out.append(d)            # re-inject the missed static object at its last position
+        return out
+
+
 class MockDetector:
     """Returns a fixed detection list — for testing the graph logic without a model."""
     def __init__(self, dets: List[Detection]):

@@ -74,6 +74,9 @@ def main():
     ap.add_argument("--min-area", type=float, default=0.0,
                     help="ignore objects smaller than this fraction of the frame "
                          "(e.g. 0.015 in a cluttered/far scene; ~0 for a close single desk)")
+    ap.add_argument("--depth", action="store_true",
+                    help="run monocular Depth-Anything per image so inside/on are "
+                         "depth-consistent (needs `pip install transformers`; slower)")
     ap.add_argument("--mock", action="store_true")
     args = ap.parse_args()
 
@@ -81,6 +84,11 @@ def main():
     os.makedirs(out, exist_ok=True)
     up = tuple(float(x) for x in args.up.split(",")) if args.up else None
     det = make_detector(args)
+    depth_model = None
+    if args.depth:
+        from depth import DepthAnything
+        depth_model = DepthAnything()
+        print("[depth] Depth-Anything on — inside/on gated by depth consistency")
 
     files = sorted(sum([glob.glob(os.path.join(args.images, e))
                         for e in ("*.jpg", "*.jpeg", "*.png", "*.JPG")], []))
@@ -96,9 +104,11 @@ def main():
             print("  skip (unreadable):", os.path.basename(fp)); continue
         H, W = img.shape[:2]
         dets = det.detect(img)
+        dmap = depth_model.predict(img) if depth_model is not None else None
         g = build_graph(dets, (W, H), up=up, near_frac=args.near_frac, min_score=args.min_score,
                         surface_frac=args.surface_frac, surface_min_holds=args.surface_min_holds,
-                        overlapping=args.with_overlapping, min_area_frac=args.min_area)
+                        overlapping=args.with_overlapping, min_area_frac=args.min_area,
+                        depth_map=dmap)
         cap = f"{len(g.nodes)} objects, {len(g.edges)} relations"
         ann = draw_overlay(img, g, caption=cap)
         name = os.path.splitext(os.path.basename(fp))[0]
