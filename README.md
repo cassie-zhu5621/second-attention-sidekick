@@ -16,6 +16,9 @@ The VLM is a **compiler and auditor, not the runtime**: it never runs per frame.
         ▼
  VLM PLANNER (planner.py) ──► watch-spec JSON: combos over a fixed 11-row vocabulary
         │                      all / any / not / then + time window + "why" + "missing"
+        │                      (= the "free" grammar, chosen by the preliminary study;
+        │                       a "restricted" OR-of-ANDs arm — a strict subset — is
+        │                       kept in planner.py for study reproduction)
         ▼
  CV EXECUTOR (relations.py + watch_exec.py)
    MediaPipe Face/Pose (people) + YOLO/GDINO (object slots)
