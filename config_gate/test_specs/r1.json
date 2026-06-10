@@ -1,0 +1,12 @@
+{
+ "watch": [
+  {
+   "all": [
+    1
+   ],
+   "within_s": 2,
+   "label": "test row 1"
+  }
+ ],
+ "single_ok": []
+}

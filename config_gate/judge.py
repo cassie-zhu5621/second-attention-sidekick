@@ -109,7 +109,7 @@ def _offline(jpeg: bytes, rel: str, taste: ReportabilityTaste) -> dict:
     return {"axes": scores, "note": f"[offline] {rel[:48]}" or "a quiet moment"}
 
 
-def _prompt(rel: str, taste: ReportabilityTaste) -> str:
+def _prompt(rel: str, taste: ReportabilityTaste, confirm: str = "") -> str:
     lines = [
         "You are the noticing companion's judgment brain for a camera placed in a shared space.",
         "This moment already passed a novelty gate (something structurally changed), so do NOT",
@@ -122,17 +122,28 @@ def _prompt(rel: str, taste: ReportabilityTaste) -> str:
         lines.append(f'The person especially cares about: "{taste.about.strip()}".')
     if rel:
         lines.append(f"\nStructured grounding — {rel}")
-    lines.append('\nReturn ONLY JSON: {"axes": {"people":0-1,"relevance":0-1,'
-                 '"consequence":0-1,"continuity":0-1}, "note": "<one field note, <=16 words>"}')
+    if confirm:
+        lines.append(f'\nFIRST, verify against the image: does it actually show "{confirm}"?'
+                     " The geometry is a cheap 2D estimate and can be fooled by depth (a ray"
+                     " passing IN FRONT of an object is not attention to it). If the image does"
+                     ' not support it, set "confirmed": false and say why in the note.')
+    js = '{"axes": {"people":0-1,"relevance":0-1,"consequence":0-1,"continuity":0-1}, '
+    js += '"confirmed": true|false, ' if confirm else ''
+    js += '"note": "<one field note, <=16 words>"}'
+    lines.append(f"\nReturn ONLY JSON: {js}")
     return "\n".join(lines)
 
 
 def judge(jpeg: Optional[bytes], graph, taste: ReportabilityTaste,
-          delta_added=None, model: str = MODEL) -> dict:
-    """Judge one gated moment. Returns {worth, why, note, axes}."""
+          delta_added=None, model: str = MODEL, confirm: str = "") -> dict:
+    """Judge one gated moment. Returns {worth, why, note, axes, confirmed}.
+    `confirm`: optional relation claim (e.g. "a person gazing at the cup") — the VLM first
+    VERIFIES it against the image (the precision half of the gate→VLM split for the
+    designed-relation branch); unconfirmed moments come back with worth=0."""
     rel = relations_text(graph, delta_added) if graph is not None else ""
     if os.environ.get("SECONDATTN_OFFLINE") == "1" or jpeg is None:
         out = _offline(jpeg, rel, taste)
+        out["confirmed"] = True
     else:
         import anthropic
         client = anthropic.Anthropic()
@@ -141,17 +152,20 @@ def judge(jpeg: Optional[bytes], graph, taste: ReportabilityTaste,
             model=model, max_tokens=200,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                {"type": "text", "text": _prompt(rel, taste)}]}])
+                {"type": "text", "text": _prompt(rel, taste, confirm)}]}])
         text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
         try:
             s, e = text.index("{"), text.rindex("}") + 1
             raw = json.loads(text[s:e])
             out = {"axes": {a: float(raw.get("axes", {}).get(a, 0.0)) for a in AXES},
-                   "note": str(raw.get("note", ""))[:120]}
+                   "note": str(raw.get("note", ""))[:120],
+                   "confirmed": bool(raw.get("confirmed", True))}
         except Exception:
-            out = {"axes": {a: 0.0 for a in AXES}, "note": f"parse-fail: {text[:40]}"}
-    worth = taste.compose(out["axes"])
-    return {"worth": worth, "why": taste.why(out["axes"]), "note": out["note"], "axes": out["axes"]}
+            out = {"axes": {a: 0.0 for a in AXES}, "note": f"parse-fail: {text[:40]}",
+                   "confirmed": False}
+    worth = taste.compose(out["axes"]) if out["confirmed"] else 0.0
+    return {"worth": worth, "why": taste.why(out["axes"]), "note": out["note"],
+            "axes": out["axes"], "confirmed": out["confirmed"]}
 
 
 if __name__ == "__main__":

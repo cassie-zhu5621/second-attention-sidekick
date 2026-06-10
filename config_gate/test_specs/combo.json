@@ -1,0 +1,31 @@
+{
+ "watch": [
+  {
+   "all": [
+    3,
+    5
+   ],
+   "within_s": 4,
+   "label": "close + looking at robot"
+  },
+  {
+   "then": [
+    7,
+    3
+   ],
+   "within_s": 15,
+   "label": "approach then eye-contact"
+  },
+  {
+   "all": [
+    3
+   ],
+   "not": [
+    9
+   ],
+   "within_s": 4,
+   "label": "eye-contact unless hands busy"
+  }
+ ],
+ "single_ok": []
+}

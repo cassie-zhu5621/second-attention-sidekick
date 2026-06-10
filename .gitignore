@@ -35,3 +35,9 @@ config_gate/feed/
 # recordings & perception outputs
 *.mp4
 **/_perception*/
+
+# --- exceptions: paper data & study artifacts MUST be committed ---
+!config_gate/results/**
+!config_gate/scenes/*.jpg
+*.task
+config_gate/context.txt

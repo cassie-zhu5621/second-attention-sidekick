@@ -381,9 +381,13 @@ class GroundingDinoDetector:
         inputs = self.proc(images=pil, text=self.prompt, return_tensors="pt").to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
+        # transformers renamed box_threshold -> threshold (~v4.51); support both.
+        import inspect
+        kw = ("threshold" if "threshold" in inspect.signature(
+              self.proc.post_process_grounded_object_detection).parameters else "box_threshold")
         res = self.proc.post_process_grounded_object_detection(
-            outputs, inputs.input_ids, box_threshold=self.conf, text_threshold=self.conf,
-            target_sizes=[(H, W)])[0]
+            outputs, inputs.input_ids, text_threshold=self.conf,
+            target_sizes=[(H, W)], **{kw: self.conf})[0]
         out = []
         for box, score, label in zip(res["boxes"], res["scores"], res["labels"]):
             x1, y1, x2, y2 = [float(v) for v in box.tolist()]

@@ -57,6 +57,11 @@ exists and runs. Hardware is calibrated. The pivot and the next steps are at the
 - **depth.py** — optional Depth-Anything (NOT needed for this branch).
 - **grounding_map.md** — references table (incl. the Media Equation row).
 
+## System layout, camera, pan-tilt, architecture
+See **`SYSTEM_MAP.md`** — full directory map, camera (M5 MJPEG) and pan-tilt (rig.py + firmware) wiring,
+calibration values, and the two fixed contracts (Detector `.detect()` + rig `move_to`/`get_frame`).
+The architecture is a working BASE, not frozen — refactor freely on this branch.
+
 ## Hardware + calibration (lab rig, measured)
 - Camera: **M5 UnitCam S3**, MJPEG `http://<ip>/` (was `172.20.10.2` on phone hotspot — IP changes!),
   UXGA 1600×1200 ~2 fps, **ONE viewer at a time**.
