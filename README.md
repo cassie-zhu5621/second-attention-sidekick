@@ -31,7 +31,7 @@ The VLM is a **compiler and auditor, not the runtime**: it never runs per frame.
 ```
 
 The vocabulary is **literature-grounded** (Hall, Kendon, Goffman, …) and versioned —
-see `config_gate/relation_table.md`. A preliminary study (`planner_study.py`, results in
+see `config_gate/docs/relation_table.md`. A preliminary study (`studies/planner_study.py`, results in
 `config_gate/results/`) validated the context→spec mapping and drove vocabulary v1→v2.
 
 ## Quick start
@@ -50,7 +50,7 @@ Useful flags: `--camera 0` (laptop webcam) · `--plan-frame` (planner sees the s
 `--spec-file test_specs/r9.json` (skip planner, deterministic testing) · `--offline`
 (no API key, fake planner/judge) · `--confirm` (VLM double-checks before recording).
 
-## Repo layout (detail: `config_gate/SYSTEM_MAP.md`)
+## Repo layout (detail: `config_gate/docs/SYSTEM_MAP.md`)
 
 | Path | What |
 |---|---|
@@ -60,8 +60,8 @@ Useful flags: `--camera 0` (laptop webcam) · `--plan-frame` (planner sees the s
 | `config_gate/watch_exec.py` | watch-spec executor (windows, persist, cooldown) |
 | `config_gate/attention_ui.py` | web UI: live + plan + feed + context box |
 | `config_gate/gaze.py`, `perceive.py`, `judge.py` | direction primitives · detectors · confirm judge |
-| `config_gate/planner_study.py`, `compare_plan.py`, `make_report_figures.py`, `results/` | studies + paper data/figures |
-| `config_gate/relation_table.md`, `TEST_PLAN_system.md` | vocabulary v2 · live-test record sheet |
+| `config_gate/studies/` (planner study, plan ablation, figures), `results/` | studies + paper data/figures |
+| `config_gate/docs/relation_table.md`, `TEST_PLAN_system.md` | vocabulary v2 · live-test record sheet |
 | `config_gate/rig.py`, `cam_test.py`, `rig_moves.py` | hardware adapters (M5 + pan-tilt) |
 | `firmware/` | `unitcams3_stream` (camera MJPEG) · `pantilt_r4` (**keep**: servo firmware for the motion phase) |
 | `archive/` | retired generations (old structural gate, 9-dim brain, collector) |
@@ -86,9 +86,9 @@ planner study (v1→v2 vocabulary revision closed-loop); figures F1–F8.
 
 Planned, in order:
 1. **Detectability mini-study** — staged pos/neg trials per relation row on the real rig
-   (`TEST_PLAN_system.md` section 2 is the recording sheet).
+   (`docs/TEST_PLAN_system.md` section 2 is the recording sheet).
 2. **Scenario elicitation (v3)** — replace designed test scenarios with prompts collected
-   from lab members (`elicitation_form.md`); re-run the planner study on them.
+   from lab members (`docs/elicitation_form.md`); re-run the planner study on them.
 3. **Pan-tilt integration** — merge the SCAN → confirm → WATCH-at-pose loop
    (`attention_robot.py`) with the VLM-first executor; `firmware/pantilt_r4` is the
    motion reference.

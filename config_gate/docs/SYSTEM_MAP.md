@@ -20,14 +20,13 @@ config_gate/                               # the live system (everything runs fr
   gaze.py            # direction primitives: head-pose / arm rays; rows 1-4 + neon draw helpers
   perceive.py        # Detection + detectors (yolo/yoloworld/gdino) + make_detector() factory
   judge.py           # back-end VLM judge (confirm step) + ReportabilityTaste
-  # --- studies & paper artifacts ---
-  planner_study.py   # preliminary study: scenarios x temps x grammars -> consistency/coverage
-  compare_plan.py    # LLM-vs-VLM ablation: same context, text-only vs text+frame
-  make_report_figures.py  # regenerates results/figures/F1-F8 from study jsonl
+  # --- studies & paper artifacts (run from config_gate/: python studies/<script>.py) ---
+  studies/planner_study.py   # preliminary study: scenarios x temps x grammars
+  studies/compare_plan.py    # LLM-vs-VLM ablation: text-only vs text+frame
+  studies/make_report_figures.py  # regenerates results/figures/F1-F8
   results/           # study jsonl/md + figures (COMMITTED: paper data)
   test_specs/        # canned watch-specs r1-r11 + combo (per-item live testing)
   scenes/            # still frames for plan ablations
-  elicitation_form.md     # Google-Form text for the scenario elicitation round
   # --- hardware adapters ---
   rig.py             # GimbalRig: move_to() serial + get_frame() M5 MJPEG; calibration; nod()
   cam_test.py        # camera-only stream test;  rig_moves.py  # named motion test
@@ -37,13 +36,14 @@ config_gate/                               # the live system (everything runs fr
   robot_demo.py      # OLD generic structural gate on the rig (+ orient_target helper)
   web_demo.py        # old web feed (taste box); config_surprise.py / viz.py: its gate + overlay
   run_perception.py  # batch detector A/B on saved frames
-  # --- docs ---
-  SYSTEM_MAP.md           # THIS file
-  relation_table.md       # vocabulary v2 (11 rows) + grammars + grounding (paper-bound)
-  TEST_PLAN_system.md     # live test record sheet (= detectability mini-study data)
-  TEST_PLAN_gaze.md       # earlier gaze-branch checklist
-  BRANCH_gaze_handoff.md  # the gaze branch: concept pivot + history
-  grounding_map.md        # references / theory grounding (incl. Media Equation)
+  # --- docs/ ---
+  docs/SYSTEM_MAP.md           # THIS file
+  docs/relation_table.md       # vocabulary v2 (11 rows) + grammars + grounding (paper-bound)
+  docs/TEST_PLAN_system.md     # live test record sheet (= detectability mini-study data)
+  docs/TEST_PLAN_gaze.md       # earlier gaze-branch checklist
+  docs/BRANCH_gaze_handoff.md  # the gaze branch: concept pivot + history
+  docs/grounding_map.md        # references / theory grounding (incl. Media Equation)
+  docs/elicitation_form.md     # Google-Form text for the scenario elicitation round
 archive/old_gate/                          # retired config-surprise experiments & docs
 ```
 

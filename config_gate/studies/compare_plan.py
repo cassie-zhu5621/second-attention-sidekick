@@ -8,7 +8,11 @@ same context, planned twice — text-only vs text+frame — print both specs sid
 Appends both raw results to results/plan_ablation.jsonl (paper data).
 """
 
+
 from __future__ import annotations
+
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse, json, os, time
 
 from planner import plan, VOCAB, MODEL

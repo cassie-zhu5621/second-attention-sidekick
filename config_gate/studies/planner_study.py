@@ -40,7 +40,11 @@ Outputs
     results/planner_study_<model>.md              # the summary table (paper-ready draft)
 """
 
+
 from __future__ import annotations
+
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse, itertools, json, os, time
 from collections import Counter
 
