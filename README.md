@@ -6,7 +6,7 @@ watches and records only those, like a considerate observer rather than a survei
 camera. The research frame is **delegated noticing**: attending to other people's
 attention ("second attention") on the owner's behalf.
 
-## Architecture — VLM plans, CV watches
+## Architecture — Real-time Interaction--->VLM plans--->CV watches
 
 The VLM is a **compiler and auditor, not the runtime**: it never runs per frame.
 
@@ -14,10 +14,10 @@ The VLM is a **compiler and auditor, not the runtime**: it never runs per frame.
  context (typed; + current frame with --plan-frame)
         │
         ▼
- VLM PLANNER (planner.py) ──► watch-spec JSON: combos over a fixed 11-row vocabulary
+ VLM PLANNER (planner.py) ──► watch-spec JSON: combos over a fixed **11-row vocabulary**
         │                      all / any / not / then + time window + "why" + "missing"
-        │                      (= the "free" grammar, chosen by the preliminary study;
-        │                       a "restricted" OR-of-ANDs arm — a strict subset — is
+        │                      (= the "free" grammar, chosen by the **preliminary study**;
+        │                       a "restricted" OR-of-ANDs arm — is
         │                       kept in planner.py for study reproduction)
         ▼
  CV EXECUTOR (relations.py + watch_exec.py)
@@ -41,7 +41,7 @@ pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-...
 cd config_gate
 
-python cam_test.py --camera http://<m5-ip>/        # camera alive? (ONE viewer at a time)
+python cam_test.py --camera http://<m5-ip>/        # test camera only (ONE viewer at a time)
 echo "I'm away until 6pm; watch who comes to my desk." > context.txt
 python attention_system.py --serve --save           # web UI at http://localhost:8000
 ```
@@ -67,7 +67,6 @@ Useful flags: `--camera 0` (laptop webcam) · `--plan-frame` (planner sees the s
 | `archive/` | retired generations (old structural gate, 9-dim brain, collector) |
 
 Runtime output (`dataset/`, `feed/`, `weights/`, `*.pt`, `*.task`) is git-ignored;
-`config_gate/results/` (study data + figures) IS committed — it is paper material.
 
 ## Hardware
 
