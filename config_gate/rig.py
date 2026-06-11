@@ -121,8 +121,18 @@ class GimbalRig:
             raise RuntimeError("Lost the M5 stream")
         return self.grab.latest.copy()
 
+    def beep(self):
+        """'Noticed' chirp on the rig's passive buzzer (firmware 'beep' command; D8)."""
+        try:
+            self.ser.write(b"beep\n")
+        except Exception:
+            pass
+
     def nod(self, depth=8, times=1):
-        """Legible 'noticed' — a small tilt dip and back. (Reuses the tilt servo; no 3rd servo.)"""
+        """Legible 'noticed' — chirp + a small tilt dip and back. Sound fires FIRST so the
+        cue lands even when eyes are on the screen, then the head dips (cue trio: turn
+        happened earlier, now beep + nod)."""
+        self.beep()
         base = self.tilt
         for _ in range(times):
             self.move_to(self.pan, base + depth); self.move_to(self.pan, base)  # +tilt = dip DOWN

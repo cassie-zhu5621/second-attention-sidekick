@@ -7,17 +7,21 @@
  * Serial (115200), one line:
  *   "pan,tilt"   -> ease to that target (degrees relative to center), e.g. "30,-10"
  *   "off"        -> relax (detach) the servos now
+ *   "beep"       -> 'noticed' chirp on the passive buzzer (two rising notes)
  *
  * AUTO-RELAX: if no command arrives for IDLE_MS, the servos detach so they stop
  * buzzing / heating up when idle. Any new "pan,tilt" re-attaches and moves them.
  *
  * Wiring: PAN -> D9, TILT -> D10, servo V+ -> external 5V, GND shared, R4 on USB.
+ *         PASSIVE BUZZER: + -> D8, - -> GND.  (passive = needs tone(); a chirp is
+ *         the audible half of the 'noticed' cue, synced with the nod by the laptop.)
  */
 
 #include <Servo.h>
 
 const int PAN_PIN  = 9;
 const int TILT_PIN = 10;
+const int BUZZ_PIN = 8;
 
 const int PAN_CENTER  = 90;
 const int TILT_CENTER = 90;
@@ -53,6 +57,12 @@ void relax() {
   }
 }
 
+void chirp() {                      // 'noticed': two short rising notes (friendly, not alarm-like)
+  tone(BUZZ_PIN, 880);  delay(80);
+  tone(BUZZ_PIN, 1320); delay(120);
+  noTone(BUZZ_PIN);
+}
+
 void easeTo(int tp, int tt) {
   tp = clampi(tp, PAN_MIN, PAN_MAX);
   tt = clampi(tt, TILT_MIN, TILT_MAX);
@@ -80,6 +90,10 @@ void loop() {
     line.trim();
     if (line == "off" || line == "relax") {
       relax();
+    } else if (line == "beep") {
+      chirp();
+      lastCmd = millis();
+      Serial.println("beep");
     } else {
       int comma = line.indexOf(',');
       if (comma > 0) {
