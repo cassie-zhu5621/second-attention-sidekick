@@ -23,8 +23,8 @@
 #include "esp_camera.h"
 
 // ======================= EDIT THESE =======================
-const char* ssid     = "5C6199D481FE-2G";        // <-- set per network, then RE-FLASH
-const char* password = "6yyvhwhzcv7rf0";    // <-- set per network, then RE-FLASH
+const char* ssid     = "cyberneticbeinglab";        // <-- set per network, then RE-FLASH
+const char* password = "c1bernet1cs";    // <-- set per network, then RE-FLASH
 const char* HOSTNAME = "sidekick-loop";    // loop cam = "sidekick-loop"; collector cam = "sidekick-cam"
 // ==========================================================
 

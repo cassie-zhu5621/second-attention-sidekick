@@ -147,10 +147,15 @@ class RelationEngine:
     def __init__(self, detector, max_people=4,
                  tol_gaze=12.0, tol_mutual=25.0,
                  approach_win_s=3.0, approach_frac=0.20,
-                 lean_deg=15.0, sustain_s=1.0, event_hold_s=5.0):
+                 lean_deg=15.0, sustain_s=1.0, event_hold_s=5.0,
+                 pose_backend="mediapipe"):
         self.det = detector
-        self.faces = HeadPoseEstimator(max_faces=max_people)
-        self.poses = PoseEstimator(max_people=max_people)
+        self.faces = HeadPoseEstimator(max_faces=max_people)   # face/gaze ALWAYS MediaPipe
+        if pose_backend == "comotion":                          # experimental 3D backend
+            from comotion_pose import CoMotionPoseEstimator
+            self.poses = CoMotionPoseEstimator()
+        else:
+            self.poses = PoseEstimator(max_people=max_people)
         self.tracker = Tracker()
         self.tol_gaze, self.tol_mutual = tol_gaze, tol_mutual
         self.approach_win_s, self.approach_frac = approach_win_s, approach_frac
@@ -197,7 +202,9 @@ class RelationEngine:
         t = time.time() if t is None else t
         H, W = frame_bgr.shape[:2]
         rays = self.faces.estimate(frame_bgr)
-        people = self.tracker.assign(self.poses.estimate(frame_bgr), (W, H), t)
+        people = self.poses.estimate(frame_bgr)
+        if any(p.pid < 0 for p in people):        # backend without ids (mediapipe) -> our tracker
+            people = self.tracker.assign(people, (W, H), t)
         dets = self.det.detect(frame_bgr) if self.det else []
         return self.evaluate(rays, people, dets, (W, H), t)
 

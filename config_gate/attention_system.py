@@ -87,6 +87,8 @@ def main():
                     help="JSON watch-spec file: SKIP the planner and execute exactly this "
                          "(deterministic per-item testing; context hot-reload disabled)")
     ap.add_argument("--detector", default="yolo", help="yolo | yoloworld | gdino")
+    ap.add_argument("--pose-backend", default="mediapipe",
+                    help="mediapipe (default) | comotion (experimental 3D, see comotion_pose.py)")
     ap.add_argument("--vocab", default="person,laptop,monitor,keyboard,mouse,cup,bottle,chair,"
                                        "desk,bag,book,cell phone,potted plant")
     ap.add_argument("--conf", type=float, default=0.3)
@@ -186,7 +188,8 @@ def main():
     push_plan()
     engine = RelationEngine(make_detector(args.detector,
                                           [v.strip() for v in args.vocab.split(",")],
-                                          conf=args.conf))
+                                          conf=args.conf),
+                            pose_backend=args.pose_backend)
     if args.save:
         os.makedirs(args.feed_dir, exist_ok=True)
         rel_log = open(os.path.join(args.feed_dir, "relation_log.jsonl"), "a")
