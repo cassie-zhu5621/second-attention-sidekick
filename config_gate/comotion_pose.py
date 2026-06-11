@@ -41,6 +41,19 @@ _SMPL2LM = {15: NOSE,            # head (nose proxy)
             20: L_WR, 21: R_WR,  # wrists
             1: L_HIP, 2: R_HIP}  # hips
 
+# full SMPL kinematic tree (24 joints) for detailed visualization
+# 0 pelvis 1/2 hips 3/6/9 spine 4/5 knees 7/8 ankles 10/11 feet 12 neck 13/14 collars
+# 15 head 16/17 shoulders 18/19 elbows 20/21 wrists 22/23 hands; 24-26 aux face pts
+SMPL_EDGES = [(0, 1), (0, 2), (0, 3), (1, 4), (2, 5), (3, 6), (4, 7), (5, 8), (6, 9),
+              (7, 10), (8, 11), (9, 12), (12, 15), (9, 13), (9, 14), (13, 16), (14, 17),
+              (16, 18), (17, 19), (18, 20), (19, 21), (20, 22), (21, 23)]
+_LIMB_COLOR = {"torso": (200, 200, 60), "arm_l": (60, 230, 60), "arm_r": (60, 160, 255),
+               "leg_l": (230, 120, 60), "leg_r": (180, 60, 230)}
+_EDGE_GROUP = {(0, 1): "leg_l", (1, 4): "leg_l", (4, 7): "leg_l", (7, 10): "leg_l",
+               (0, 2): "leg_r", (2, 5): "leg_r", (5, 8): "leg_r", (8, 11): "leg_r",
+               (13, 16): "arm_l", (16, 18): "arm_l", (18, 20): "arm_l", (20, 22): "arm_l",
+               (14, 17): "arm_r", (17, 19): "arm_r", (19, 21): "arm_r", (21, 23): "arm_r"}
+
 
 class CoMotionPoseEstimator:
     """frame (BGR) -> List[PersonPose] with STABLE pids from CoMotion's online tracker.
@@ -57,6 +70,7 @@ class CoMotionPoseEstimator:
         self.model = comotion.CoMotion(use_coreml=self.use_mps).to(self.device).eval()
         self._init = False
         self.pos3d: Dict[int, Tuple[float, float, float]] = {}
+        self.last_raw: List[Tuple[int, np.ndarray]] = []   # (pid, uv 27x2) — for detailed viz
         self._dumped = False
 
     # ------------------------------------------------------------------ #
@@ -96,9 +110,11 @@ class CoMotionPoseEstimator:
             print(f"[comotion] track unpack failed ({e}) — check the probe dump")
             return out
         valid = (betas != 0).any(-1) & (ids > 0)
+        self.last_raw = []
         for n in valid.nonzero().flatten().tolist():
             pid = int(ids[n])
             uv = p2d[n].cpu().numpy()
+            self.last_raw.append((pid, uv))
             pts = {lm: (float(uv[sj, 0]), float(uv[sj, 1]))
                    for sj, lm in _SMPL2LM.items() if sj < len(uv)}
             if len(pts) < len(_SMPL2LM):
@@ -140,6 +156,7 @@ if __name__ == "__main__":
                 continue
             shared["frame"] = None       # claim the latest frame; newer ones replace it
             shared["people"] = est.estimate(fr)
+            shared["raw"] = list(est.last_raw)
             stamps.append(time.time())
 
     threading.Thread(target=worker, daemon=True).start()
@@ -148,13 +165,16 @@ if __name__ == "__main__":
         if not ok:
             continue
         shared["frame"] = fr.copy()      # hand the freshest frame to the worker
-        for p in shared["people"]:       # draw last-known skeletons (slightly stale)
-            for a, b in ((L_SH, R_SH), (L_SH, L_EL), (L_EL, L_WR), (R_SH, R_EL),
-                         (R_EL, R_WR), (L_HIP, R_HIP), (L_SH, L_HIP), (R_SH, R_HIP)):
-                cv2.line(fr, tuple(map(int, p.pts[a])), tuple(map(int, p.pts[b])),
-                         (60, 230, 60), 3)
-            cv2.putText(fr, f"p{p.pid}", tuple(map(int, p.pts[NOSE])),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 210, 60), 2)
+        for pid, uv in shared.get("raw", []):   # FULL 27-joint skeleton (slightly stale)
+            for a, b in SMPL_EDGES:
+                col = _LIMB_COLOR.get(_EDGE_GROUP.get((a, b), "torso"))
+                cv2.line(fr, (int(uv[a, 0]), int(uv[a, 1])),
+                         (int(uv[b, 0]), int(uv[b, 1])), col, 3)
+            for j in range(len(uv)):            # every joint as a dot; face aux in white
+                cv2.circle(fr, (int(uv[j, 0]), int(uv[j, 1])), 4,
+                           (255, 255, 255) if j >= 24 else (30, 30, 30), -1)
+            cv2.putText(fr, f"p{pid}", (int(uv[15, 0]) + 10, int(uv[15, 1]) - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 210, 60), 2)
         ifps = (len(stamps) - 1) / max(1e-6, stamps[-1] - stamps[0]) if len(stamps) > 1 else 0
         cv2.putText(fr, f"display: live   inference: {ifps:.1f} fps   "
                     f"{len(shared['people'])} people",

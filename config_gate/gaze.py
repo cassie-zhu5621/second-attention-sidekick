@@ -352,6 +352,7 @@ class ArmRayEstimator:
         self._ts = 0
         self.min_extension_deg = min_extension_deg
         self.min_visibility = min_visibility
+        self.last_debug: List[dict] = []   # per shoulder/elbow/wrist (for --skeleton): pts, vis, angle
 
     def estimate(self, frame_bgr: np.ndarray) -> List[ArmRay]:
         import cv2
@@ -361,14 +362,21 @@ class ArmRayEstimator:
         self._ts += 33
         res = self._lm.detect_for_video(img, self._ts)
         out: List[ArmRay] = []
+        self.last_debug = []
         for person in (res.pose_landmarks or []):    # one landmark list per detected person
             for side, (s, e, w) in _ARM_LMS.items():
                 vis = min(getattr(person[i], "visibility", 1.0) or 1.0 for i in (s, e, w))
+                sp = (person[s].x * W, person[s].y * H)
+                ep = (person[e].x * W, person[e].y * H)
+                wp = (person[w].x * W, person[w].y * H)
+                v1 = (sp[0] - ep[0], sp[1] - ep[1]); v2 = (wp[0] - ep[0], wp[1] - ep[1])
+                n1 = math.hypot(*v1); n2 = math.hypot(*v2)
+                ang = (math.degrees(math.acos(max(-1.0, min(1.0,
+                       (v1[0]*v2[0] + v1[1]*v2[1]) / (n1*n2)))))) if n1 > 0 and n2 > 0 else 0.0
+                self.last_debug.append({"side": side, "pts": (sp, ep, wp), "vis": vis, "angle": ang})
                 if vis < self.min_visibility:
                     continue
-                r = arm_ray_from_points((person[s].x * W, person[s].y * H),
-                                        (person[e].x * W, person[e].y * H),
-                                        (person[w].x * W, person[w].y * H), side=side,
+                r = arm_ray_from_points(sp, ep, wp, side=side,
                                         min_extension_deg=self.min_extension_deg)
                 if r:
                     out.append(r)
@@ -494,6 +502,8 @@ if __name__ == "__main__":
     ap.add_argument("--camera", default="0", help="webcam index (0) or M5 MJPEG URL")
     ap.add_argument("--tol", type=float, default=12.0, help="gazing-at angular tolerance (deg)")
     ap.add_argument("--no-arms", action="store_true", help="skip MediaPipe Pose (#4 pointing)")
+    ap.add_argument("--skeleton", action="store_true",
+                    help="debug: draw shoulder-elbow-wrist + elbow angle/visibility (see why no arm ray)")
     ap.add_argument("--detect", action="store_true",
                     help="also run a detector and highlight gazed-at / pointed-at objects")
     ap.add_argument("--detector", default="yolo", help="yolo | yoloworld | gdino (with --detect)")
@@ -534,6 +544,17 @@ if __name__ == "__main__":
             x1, y1, x2, y2 = map(int, d.box)
             cv2.rectangle(fr, (x1, y1), (x2, y2), (160, 160, 160), 1)
             draw_text(fr, d.label, (x1, y1 - 6), (200, 200, 200), 0.55, 1)
+
+        if args.skeleton and arm_est:                           # debug: raw arm joints + angle
+            for dbg in arm_est.last_debug:
+                sp, ep, wp = (tuple(map(int, p)) for p in dbg["pts"])
+                ok_ext = dbg["angle"] >= arm_est.min_extension_deg
+                col = C_ORANGE if ok_ext else (140, 140, 255)   # orange=extended, blue=bent/won't fire
+                cv2.line(fr, sp, ep, col, 2); cv2.line(fr, ep, wp, col, 2)
+                for p in (sp, ep, wp):
+                    cv2.circle(fr, p, 5, col, -1)
+                draw_text(fr, f"{dbg['angle']:.0f}deg v{dbg['vis']:.1f}", (ep[0] + 6, ep[1]),
+                          col, 0.5, 1)
 
         for a in arms:                                          # arm rays (orange, thick)
             draw_arrow(fr, a.origin, a.point_at(0.5 * math.hypot(W, H)), C_ORANGE)
