@@ -28,7 +28,9 @@ import numpy as np
 # CONVENTION used everywhere (incl. robot_demo): +pan looks RIGHT, +tilt looks DOWN, 0 = level.
 # The constants below map that convention onto THIS rig's wiring/mounting.
 # ADJUST 1-2
-CAM_URL     = "http://172.20.10.2/"        # ADJUST 1 (M5 MJPEG URL — changes with the network)
+import os as _os
+CAM_URL     = _os.environ.get("SIDEKICK_CAM",      # per-session override: export SIDEKICK_CAM=http://<ip>/
+                              "http://172.20.10.2/")  # ADJUST 1 (M5 MJPEG URL — changes with the network)
 SERIAL_PORT = "/dev/cu.usbmodem101"        # ADJUST 2 (use cu.* on mac)
 BAUD        = 115200                        # match pantilt_r4.ino
 
