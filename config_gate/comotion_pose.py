@@ -123,25 +123,44 @@ if __name__ == "__main__":
     est = CoMotionPoseEstimator()
     print("q to quit — first frame prints the key/shape dump (send it to Claude if "
           "extraction comes back empty)")
+    # ASYNC design: the display loop runs at full webcam rate; inference runs in a
+    # background thread on the LATEST frame only (intermediate frames are skipped —
+    # the "frameskip" suggestion, made adaptive). Skeletons are the most recent result,
+    # so they lag ~1 inference (~0.3s) behind a perfectly smooth feed.
+    import threading
     from collections import deque
-    stamps = deque(maxlen=20)            # rolling fps (excludes model load/compile time)
+    stamps = deque(maxlen=10)            # inference fps (rolling)
+    shared = {"frame": None, "people": [], "stop": False}
+
+    def worker():
+        while not shared["stop"]:
+            fr = shared["frame"]
+            if fr is None:
+                time.sleep(0.005)
+                continue
+            shared["frame"] = None       # claim the latest frame; newer ones replace it
+            shared["people"] = est.estimate(fr)
+            stamps.append(time.time())
+
+    threading.Thread(target=worker, daemon=True).start()
     while True:
         ok, fr = cap.read()
         if not ok:
             continue
-        people = est.estimate(fr)
-        stamps.append(time.time())
-        for p in people:
+        shared["frame"] = fr.copy()      # hand the freshest frame to the worker
+        for p in shared["people"]:       # draw last-known skeletons (slightly stale)
             for a, b in ((L_SH, R_SH), (L_SH, L_EL), (L_EL, L_WR), (R_SH, R_EL),
                          (R_EL, R_WR), (L_HIP, R_HIP), (L_SH, L_HIP), (R_SH, R_HIP)):
                 cv2.line(fr, tuple(map(int, p.pts[a])), tuple(map(int, p.pts[b])),
                          (60, 230, 60), 3)
             cv2.putText(fr, f"p{p.pid}", tuple(map(int, p.pts[NOSE])),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 210, 60), 2)
-        fps = (len(stamps) - 1) / max(1e-6, stamps[-1] - stamps[0]) if len(stamps) > 1 else 0
-        cv2.putText(fr, f"{fps:.1f} fps (rolling)  {len(people)} people",
+        ifps = (len(stamps) - 1) / max(1e-6, stamps[-1] - stamps[0]) if len(stamps) > 1 else 0
+        cv2.putText(fr, f"display: live   inference: {ifps:.1f} fps   "
+                    f"{len(shared['people'])} people",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         cv2.imshow("comotion probe", fr)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
+    shared["stop"] = True
     cap.release(); cv2.destroyAllWindows()
