@@ -185,28 +185,11 @@ if __name__ == "__main__":
             for a, b in SMPL_EDGES:
                 cv2.line(fr, (int(uv[a, 0]), int(uv[a, 1])),
                          (int(uv[b, 0]), int(uv[b, 1])), (60, 230, 60), 3)
-            for j in range(len(uv)):            # every joint as a dot; face aux in white
-                cv2.circle(fr, (int(uv[j, 0]), int(uv[j, 1])), 4,
-                           (255, 255, 255) if j >= 24 else (30, 30, 30), -1)
-                if j >= 24:                     # label aux ids to identify nose vs eyes
-                    cv2.putText(fr, str(j), (int(uv[j, 0]) + 5, int(uv[j, 1]) - 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            # EXPERIMENTAL head-facing ray v2: eyes-midpoint -> nose (the solvePnP idea).
-            # Among the 3 face aux points, the two upper ones (smaller y) ~ eyes, the
-            # lower one ~ nose, for an upright head. Turn left/right: nose shifts toward
-            # the turn side relative to the eyes -> the ray should follow.
-            if len(uv) >= 27:
-                aux = uv[24:27]
-                order = aux[:, 1].argsort()     # by y: first two = eyes, last = nose
-                eyes_mid = aux[order[:2]].mean(0)
-                nose = aux[order[2]]
-                dx, dy = nose[0] - eyes_mid[0], nose[1] - eyes_mid[1]
-                n = (dx * dx + dy * dy) ** 0.5
-                if n > 4:                       # px; degenerate when facing away
-                    L = 220
-                    cv2.arrowedLine(fr, (int(nose[0]), int(nose[1])),
-                                    (int(nose[0] + dx / n * L), int(nose[1] + dy / n * L)),
-                                    (255, 255, 0), 2, tipLength=0.08)
+            for j in range(len(uv)):            # every joint as a dot
+                cv2.circle(fr, (int(uv[j, 0]), int(uv[j, 1])), 4, (30, 30, 30), -1)
+            # NOTE: gaze stays with MediaPipe (gaze.py). Tested 2026-06-11: CoMotion's
+            # 3 face-aux points are nose/nose/ear (not eyes) — no usable facing geometry.
+            # The rigorous route would be FK on SMPL head rotation; deprioritized.
             cv2.putText(fr, f"p{pid}", (int(uv[15, 0]) + 10, int(uv[15, 1]) - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 210, 60), 2)
         ifps = (len(stamps) - 1) / max(1e-6, stamps[-1] - stamps[0]) if len(stamps) > 1 else 0
