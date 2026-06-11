@@ -188,18 +188,24 @@ if __name__ == "__main__":
             for j in range(len(uv)):            # every joint as a dot; face aux in white
                 cv2.circle(fr, (int(uv[j, 0]), int(uv[j, 1])), 4,
                            (255, 255, 255) if j >= 24 else (30, 30, 30), -1)
-            # EXPERIMENTAL head-facing ray: head joint -> centre of the 3 face aux points.
-            # Short vector = facing toward/away from camera (low confidence) — compare
-            # against MediaPipe's gaze ray for the long-range/side-view hybrid idea.
+                if j >= 24:                     # label aux ids to identify nose vs eyes
+                    cv2.putText(fr, str(j), (int(uv[j, 0]) + 5, int(uv[j, 1]) - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            # EXPERIMENTAL head-facing ray v2: eyes-midpoint -> nose (the solvePnP idea).
+            # Among the 3 face aux points, the two upper ones (smaller y) ~ eyes, the
+            # lower one ~ nose, for an upright head. Turn left/right: nose shifts toward
+            # the turn side relative to the eyes -> the ray should follow.
             if len(uv) >= 27:
-                hx, hy = uv[15]
-                fx, fy = uv[24:27].mean(0)
-                dx, dy = fx - hx, fy - hy
+                aux = uv[24:27]
+                order = aux[:, 1].argsort()     # by y: first two = eyes, last = nose
+                eyes_mid = aux[order[:2]].mean(0)
+                nose = aux[order[2]]
+                dx, dy = nose[0] - eyes_mid[0], nose[1] - eyes_mid[1]
                 n = (dx * dx + dy * dy) ** 0.5
-                if n > 6:                       # px; below this the direction is unstable
+                if n > 4:                       # px; degenerate when facing away
                     L = 220
-                    cv2.arrowedLine(fr, (int(hx), int(hy)),
-                                    (int(hx + dx / n * L), int(hy + dy / n * L)),
+                    cv2.arrowedLine(fr, (int(nose[0]), int(nose[1])),
+                                    (int(nose[0] + dx / n * L), int(nose[1] + dy / n * L)),
                                     (255, 255, 0), 2, tipLength=0.08)
             cv2.putText(fr, f"p{pid}", (int(uv[15, 0]) + 10, int(uv[15, 1]) - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 210, 60), 2)
