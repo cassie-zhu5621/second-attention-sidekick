@@ -69,8 +69,7 @@ actual rig — the point being that **a small, low-cost camera suffices** for al
 relations (frame rate and resolution are properties of the current module, not of the
 approach, and may improve with hardware). Per relation, N staged positive and N staged
 negative trials at room distances → hit rate / false-alarm rate, reported as a "measured
-reliability" column. Rows 1–4 are partially covered by TEST_PLAN_gaze.md already; rows
-5–10 get the same protocol once implemented. Failure conditions (side-on pointing,
+reliability" column. The protocol and recording sheet live in TEST_PLAN_system.md (section 2). Failure conditions (side-on pointing,
 distance limits) go into the paper's limitations — measured, not guessed.
 
 ## Why these ten — selection rationale (the claim, stated carefully)

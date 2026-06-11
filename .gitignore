@@ -41,3 +41,4 @@ config_gate/feed/
 !config_gate/scenes/*.jpg
 *.task
 config_gate/context.txt
+config_gate/docs/grounding_map.md

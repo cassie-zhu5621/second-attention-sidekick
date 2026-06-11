@@ -40,9 +40,8 @@ config_gate/                               # the live system (everything runs fr
   docs/SYSTEM_MAP.md           # THIS file
   docs/relation_table.md       # vocabulary v2 (11 rows) + grammars + grounding (paper-bound)
   docs/TEST_PLAN_system.md     # live test record sheet (= detectability mini-study data)
-  docs/TEST_PLAN_gaze.md       # earlier gaze-branch checklist
   docs/BRANCH_gaze_handoff.md  # the gaze branch: concept pivot + history
-  docs/grounding_map.md        # references / theory grounding (incl. Media Equation)
+  docs/grounding_map.md        # theory grounding notes (local only, not in git)
   docs/elicitation_form.md     # Google-Form text for the scenario elicitation round
 archive/old_gate/                          # retired config-surprise experiments & docs
 ```
