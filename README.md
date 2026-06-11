@@ -39,16 +39,32 @@ see `config_gate/docs/relation_table.md`. A preliminary study (`studies/planner_
 ```bash
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-...
+export SIDEKICK_CAM=http://<m5-ip>/                # camera IP for this terminal session
 cd config_gate
 
-python cam_test.py --camera http://<m5-ip>/        # test camera only (ONE viewer at a time)
+python cam_test.py                                  # test camera only (ONE viewer at a time)
 echo "I'm away until 6pm; watch who comes to my desk." > context.txt
-python attention_system.py --serve --save           # web UI at http://localhost:8000
+
+python attention_system.py --serve --save                                # static, full pipeline
+python attention_system.py --serve --save --plan-frame --rig \
+                           --port /dev/cu.usbmodem101                    # + pan-tilt body
 ```
 
-Useful flags: `--camera 0` (laptop webcam) · `--plan-frame` (planner sees the scene) ·
-`--spec-file test_specs/r9.json` (skip planner, deterministic testing) · `--offline`
-(no API key, fake planner/judge) · `--confirm` (VLM double-checks before recording).
+### Flags — what each one adds / what removing it does
+
+| Flag | Adds | Without it |
+|---|---|---|
+| `--serve` | web UI at localhost:8000 (live, plan panel, feed, context box) | local cv2 window only |
+| `--save` | writes records to `feed/`: comic-strip frames + `relation_log.jsonl` | nothing on disk; feed is memory-only |
+| `--plan-frame` | planner sees the CURRENT camera frame (situated planning) | planner reads the context text only |
+| `--rig` | pan-tilt body: SCAN poses while quiet → on fire: buzzer + nod, stay & watch → bored: resume | static camera; servos untouched |
+| `--port <dev>` | serial port of the servo board (only matters with `--rig`) | uses `rig.py` SERIAL_PORT default |
+| `--camera <x>` | camera: M5 URL or webcam index (`0`) | uses `$SIDEKICK_CAM`, else `rig.py` CAM_URL |
+| `--confirm` | VLM re-checks the frame before recording (vetoes false positives) | records on geometry alone |
+| `--spec-file <json>` | skip the planner, execute a hand-written spec (per-item testing, `test_specs/`) | the VLM plans from the context |
+| `--offline` | fake planner/judge — runs with NO API key (plumbing tests) | real API calls |
+| `--cooldown <s>` | habituation seconds per entry (default 60; use 10 while testing) | 60 s |
+| `--no-sound` | mute the laptop "noticed" chime | chime on every fire (macOS) |
 
 ## Repo layout (detail: `config_gate/docs/SYSTEM_MAP.md`)
 
