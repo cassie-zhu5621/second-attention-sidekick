@@ -71,6 +71,7 @@ class CoMotionPoseEstimator:
         self._init = False
         self.pos3d: Dict[int, Tuple[float, float, float]] = {}
         self.last_raw: List[Tuple[int, np.ndarray]] = []   # (pid, uv 27x2) — for detailed viz
+        self._debut: Dict[int, int] = {}                   # pid -> consecutive frames seen
         self._dumped = False
 
     # ------------------------------------------------------------------ #
@@ -111,9 +112,21 @@ class CoMotionPoseEstimator:
             return out
         valid = (betas != 0).any(-1) & (ids > 0)
         self.last_raw = []
+        H, W = hw
+        seen_now = set()
         for n in valid.nonzero().flatten().tolist():
             pid = int(ids[n])
             uv = p2d[n].cpu().numpy()
+            # ---- GHOST FILTERS (live mode shows raw tracks; demo cleans offline) ----
+            inb = ((uv[:, 0] >= 0) & (uv[:, 0] < W) & (uv[:, 1] >= 0) & (uv[:, 1] < H)).mean()
+            sw = float(np.hypot(*(uv[16] - uv[17])))            # shoulder width px
+            if inb < 0.6 or sw < 12:                            # mostly offscreen / tiny ghost
+                continue
+            seen_now.add(pid)
+            # debut delay: a pid must survive 3 consecutive frames before we believe it
+            self._debut[pid] = self._debut.get(pid, 0) + 1
+            if self._debut[pid] < 3:
+                continue
             self.last_raw.append((pid, uv))
             pts = {lm: (float(uv[sj, 0]), float(uv[sj, 1]))
                    for sj, lm in _SMPL2LM.items() if sj < len(uv)}
@@ -121,6 +134,9 @@ class CoMotionPoseEstimator:
                 continue
             self.pos3d[pid] = tuple(float(v) for v in trans[n].cpu())
             out.append(PersonPose(pid=pid, pts=pts, vis={k: 1.0 for k in pts}))
+        for pid in list(self._debut):                           # absent -> streak resets
+            if pid not in seen_now:
+                del self._debut[pid]
         return out
 
     def close(self):
@@ -167,9 +183,8 @@ if __name__ == "__main__":
         shared["frame"] = fr.copy()      # hand the freshest frame to the worker
         for pid, uv in shared.get("raw", []):   # FULL 27-joint skeleton (slightly stale)
             for a, b in SMPL_EDGES:
-                col = _LIMB_COLOR.get(_EDGE_GROUP.get((a, b), "torso"))
                 cv2.line(fr, (int(uv[a, 0]), int(uv[a, 1])),
-                         (int(uv[b, 0]), int(uv[b, 1])), col, 3)
+                         (int(uv[b, 0]), int(uv[b, 1])), (60, 230, 60), 3)
             for j in range(len(uv)):            # every joint as a dot; face aux in white
                 cv2.circle(fr, (int(uv[j, 0]), int(uv[j, 1])), 4,
                            (255, 255, 255) if j >= 24 else (30, 30, 30), -1)
