@@ -173,6 +173,19 @@ if __name__ == "__main__":
             for j in range(len(uv)):            # every joint as a dot; face aux in white
                 cv2.circle(fr, (int(uv[j, 0]), int(uv[j, 1])), 4,
                            (255, 255, 255) if j >= 24 else (30, 30, 30), -1)
+            # EXPERIMENTAL head-facing ray: head joint -> centre of the 3 face aux points.
+            # Short vector = facing toward/away from camera (low confidence) — compare
+            # against MediaPipe's gaze ray for the long-range/side-view hybrid idea.
+            if len(uv) >= 27:
+                hx, hy = uv[15]
+                fx, fy = uv[24:27].mean(0)
+                dx, dy = fx - hx, fy - hy
+                n = (dx * dx + dy * dy) ** 0.5
+                if n > 6:                       # px; below this the direction is unstable
+                    L = 220
+                    cv2.arrowedLine(fr, (int(hx), int(hy)),
+                                    (int(hx + dx / n * L), int(hy + dy / n * L)),
+                                    (255, 255, 0), 2, tipLength=0.08)
             cv2.putText(fr, f"p{pid}", (int(uv[15, 0]) + 10, int(uv[15, 1]) - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 210, 60), 2)
         ifps = (len(stamps) - 1) / max(1e-6, stamps[-1] - stamps[0]) if len(stamps) > 1 else 0
