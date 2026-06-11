@@ -99,6 +99,13 @@ def main():
     ap.add_argument("--burst-interval", type=float, default=1.5,
                     help="seconds between burst shots (taken only while the entry still holds)")
     ap.add_argument("--no-sound", action="store_true", help="disable the audible 'noticed' cue")
+    ap.add_argument("--rig", action="store_true",
+                    help="pan-tilt mode: SCAN poses while all entries are quiet; on fire -> "
+                         "buzzer+nod, STAY and watch the story; resume scanning when bored")
+    ap.add_argument("--port", default=None, help="servo serial port (default: rig.py SERIAL_PORT)")
+    ap.add_argument("--look-secs", type=float, default=6.0, help="rig: dwell per scan pose")
+    ap.add_argument("--watch-end", type=float, default=8.0,
+                    help="rig: seconds of quiet before leaving a WATCH pose")
     ap.add_argument("--worth", type=float, default=0.0,
                     help="with --confirm: min reportability worth to record")
     ap.add_argument("--offline", action="store_true", help="fake planner/judge, no API key")
@@ -147,7 +154,24 @@ def main():
                 UI.STATE["why"] = (spec or {}).get("why", "")
                 UI.STATE["entries"] = spec_summary(spec)
 
-    frames = frame_source(str(args.camera))
+    rig = None
+    if args.rig:                                  # motion chassis: same brain, scanning body
+        from rig import GimbalRig, SERIAL_PORT
+        if str(args.camera).isdigit():
+            raise SystemExit("--rig needs the M5 camera URL, not a webcam index")
+        rig = GimbalRig(cam_url=str(args.camera), port=args.port or SERIAL_PORT)
+
+        def _rig_frames():
+            while True:
+                yield rig.get_frame()
+        frames = _rig_frames()
+        scan = [(p, tl) for tl in (0, 8) for p in (-50, -25, 0, 25, 50)]
+        pose_i, mstate = 0, "SCAN"
+        pose_until, last_active = 0.0, time.time()
+        print(f"[rig] live — {len(scan)} scan poses; fire -> beep+nod+WATCH; "
+              f"resume after {args.watch_end:.0f}s quiet")
+    else:
+        frames = frame_source(str(args.camera))
     first = next(frames)                          # camera live BEFORE planning; with
     if args.spec_file:                            # --plan-frame the planner sees the scene
         spec = json.load(open(args.spec_file))
@@ -216,7 +240,11 @@ def main():
                     print(f"[VETO ] {label} :: {note}")
                     banner = (t + 3, f"VLM veto: {label}", C_RED)
             if rec_ok:                                    # burst: keep shooting while it unfolds
-                beep() if not args.no_sound else None
+                if rig is not None:                       # embodied cue: buzzer chirp + nod
+                    rig.nod()
+                    mstate, last_active = "WATCH", t      # stop scanning: stay with the story
+                elif not args.no_sound:
+                    beep()
                 print(f"[STORY ] {label} — burst opened")
                 banner = (t + 3, f"watching: {label}", C_CYAN)
                 bursts.append({"label": label, "idx": executor.entries.index(e),
@@ -244,6 +272,19 @@ def main():
                        "truth": b["truth"]}
                 publish(make_strip(b["shots"]), rec, args, UI)
 
+        # ---- motion policy (rig mode): quiet -> scan; story -> stay ----
+        if rig is not None:
+            if bursts or any(s.satisfied for s in statuses):
+                last_active, mstate = t, "WATCH"
+            if mstate == "WATCH" and not bursts and t - last_active > args.watch_end:
+                mstate, pose_until = "SCAN", 0.0
+                print("[rig] bored & quiet -> resume scan")
+            if mstate == "SCAN" and t >= pose_until:
+                pose_i += 1
+                pn, tl = scan[pose_i % len(scan)]
+                rig.move_to(pn, tl)                       # blocks through the glide
+                pose_until = time.time() + args.look_secs
+
         # ---- overlay ----
         for d in viz["dets"]:
             x1, y1, x2, y2 = map(int, d.box)
@@ -266,7 +307,9 @@ def main():
         draw_panel(fr, panel)
         tv = " ".join(f"{i}{'T' if truth[i] else '·'}" for i in sorted(truth))
         draw_text(fr, tv, (12, H - 40), C_WHITE, 0.5, 1)
-        draw_text(fr, f"ctx: {ctx[:70]}", (12, H - 14), C_CYAN, 0.55, 1)
+        rig_txt = (f"{mstate} pan {rig.pan:.0f} tilt {rig.tilt:.0f}  |  "
+                   if rig is not None else "")
+        draw_text(fr, rig_txt + f"ctx: {ctx[:60]}", (12, H - 14), C_CYAN, 0.55, 1)
         if banner and t < banner[0]:
             draw_text(fr, str(banner[1])[:60], (16, 36), banner[2], 0.85, 2)
         if UI is not None:
@@ -278,6 +321,8 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows(); engine.close()
+    if rig is not None:
+        rig.close()
 
 
 if __name__ == "__main__":
