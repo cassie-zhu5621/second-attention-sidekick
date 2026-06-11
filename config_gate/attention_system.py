@@ -96,8 +96,9 @@ def main():
                     help="VLM double-checks the frame when an entry fires (judge confirm)")
     ap.add_argument("--burst-n", type=int, default=5,
                     help="shots per story burst after an entry fires (comic-strip record)")
-    ap.add_argument("--burst-interval", type=float, default=1.5,
-                    help="seconds between burst shots (taken only while the entry still holds)")
+    ap.add_argument("--burst-interval", type=float, default=4.0,
+                    help="seconds between burst shots (taken only while the entry still holds; "
+                         "5 shots ≈ a 20s story — short intervals make near-duplicate panels)")
     ap.add_argument("--no-sound", action="store_true", help="disable the audible 'noticed' cue")
     ap.add_argument("--rig", action="store_true",
                     help="pan-tilt mode: SCAN poses while all entries are quiet; on fire -> "
