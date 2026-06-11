@@ -212,6 +212,10 @@ def publish(fr, rec, args, UI):
             UI.STATE["thumbs"][rec["thumb"]] = tjpg
             for old in list(UI.STATE["thumbs"])[:-60]:
                 UI.STATE["thumbs"].pop(old, None)
+            # full-resolution frame (the comic strip) viewable in the browser, last ~20 in memory
+            UI.STATE.setdefault("frames", {})[rec["frame"]] = cv2.imencode(".jpg", fr)[1].tobytes()
+            for old in list(UI.STATE["frames"])[:-20]:
+                UI.STATE["frames"].pop(old, None)
             UI.STATE["feed"].append(rec)
             UI.STATE["feed"] = UI.STATE["feed"][-60:]
 

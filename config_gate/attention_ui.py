@@ -17,7 +17,7 @@ from __future__ import annotations
 import json, os, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-STATE = {"jpg": None, "feed": [], "thumbs": {},
+STATE = {"jpg": None, "feed": [], "thumbs": {}, "frames": {},
          "context": "", "why": "", "entries": [],      # [(expr, label)]
          "status": [],                                  # [(label, satisfied, cooling, detail)]
          "pending_context": None}
@@ -76,9 +76,11 @@ async function poll(){
         <span>${s[0]}</span><span class=detail>${s[3]||''}</span></div>`).join('');
     let f=await (await fetch('/feed.json')).json();
     document.getElementById('feed').innerHTML=f.map(m=>`<div class=card>
-      <img src="/thumb/${m.thumb}">
+      <a href="/frame/${m.frame||''}" target="_blank" title="open the full story strip">
+        <img src="/thumb/${m.thumb}"></a>
       <div><div class=note>${m.note||m.label||''}</div>
-      <div class=meta>${m.label||''} · ${m.time}</div></div>
+      <div class=meta>${m.label||''} · ${m.time} · <a href="/frame/${m.frame||''}"
+        target="_blank" style="color:#00d0d0">full strip ↗</a></div></div>
     </div>`).join('');
   }catch(e){}
 }
@@ -120,6 +122,17 @@ class H(BaseHTTPRequestHandler):
             with LOCK:
                 data = list(reversed(STATE["feed"]))
             self._send(200, "application/json", json.dumps(data).encode())
+        elif p.startswith("/frame/"):
+            name = os.path.basename(p[7:])
+            mem = STATE.get("frames", {}).get(name)
+            if mem is not None:
+                self._send(200, "image/jpeg", mem)
+            else:
+                fn = os.path.join(ARGS.feed_dir, name) if ARGS else name
+                if os.path.exists(fn):
+                    self._send(200, "image/jpeg", open(fn, "rb").read())
+                else:
+                    self._send(404, "text/plain", b"")
         elif p.startswith("/thumb/"):
             name = os.path.basename(p[7:])
             mem = STATE["thumbs"].get(name)
