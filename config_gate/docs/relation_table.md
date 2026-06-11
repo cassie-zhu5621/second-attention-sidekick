@@ -29,17 +29,17 @@ Design properties:
 
 | # | Relation | Geometric trigger (T/F test) | Prim. | Theoretical anchor | Triggerability | Status |
 |---|----------|------------------------------|-------|--------------------|----------------|--------|
-| 1 | **gazing-at** (person → object) | head-orientation 2D ray hits object box, ±12° | F+D | Gaze cueing — Friesen & Kingstone 1998; Langton et al. 2000 | high | ✅ gaze.py |
-| 2 | **joint-attention** (people → shared target) | ≥2 gaze rays converge in front of both (t>0); stronger when the convergence point falls in an object box | F(+D) | Tomasello 1995 (in Moore & Dunham); Scaife & Bruner 1975 | med | ✅ gaze.py |
-| 3 | **eye-contact** (person → robot) | 3D face-forward within ±12° of the face→camera direction | F | Mutual gaze — Argyle & Dean 1965 (equilibrium theory); Kendon 1967; Media Equation | high | ✅ gaze.py |
+| 1 | **gazing-at** (person → object) | head-orientation 2D ray hits object box, ±12° | F+D | ？ | high | ✅ gaze.py |
+| 2 | **joint-attention** (people → shared target) | ≥2 gaze rays converge in front of both (t>0); stronger when the convergence point falls in an object box | F(+D) | ？ | med | ✅ gaze.py |
+| 3 | **eye-contact** (person → robot) | 3D face-forward within ±12° of the face→camera direction | F |  (equilibrium theory); Kendon 1967; Media Equation | high | ✅ gaze.py |
 | 4 | **pointing / reaching** (person → object or person) | elbow→wrist ray, emitted only when the arm is extended (elbow ≥140°); ray hits target box | P+D | Proto-declarative pointing — Bates et al. 1975; Kita 2003 | high | ✅ gaze.py |
 | 5 | **proxemic zone** (person ↔ person) | pelvis-centre distance normalised by mean shoulder width → intimate / personal / social / public; shoulder width as the scale proxy (no depth needed) | P | **Proxemics — Hall 1966** (The Hidden Dimension) | high | ⬜ |
 | 6 | **F-formation / facing** (person ↔ person) | shoulder-line normals (body orientations) point toward each other and their o-spaces overlap | P | **Kendon 1990** (F-formations); CV precedent: Cristani et al. 2011 | med | ⬜ |
-| 7 | **approach / depart** (transition) | normalised person↔target (object/person/camera) distance decreases/increases monotonically beyond a threshold within a ~3 s window | P(+D) | Spatial model of engagement — Michalowski et al., HRI 2006; Hall dynamised | med | ⬜ |
-| 8 | **lean-in / hover-over** (engagement posture) | torso pitch (mid-shoulder→mid-hip vs vertical) tilted >15° toward an object/desk, sustained | P(+D) | Postural immediacy / lean — **Mehrabian 1969** | med | ⬜ |
-| 9 | **hands-on / manipulating** (person–object contact) | wrist keypoint inside an object box (or within 0.1×diag of its edge) sustained ≥1 s; wrist extended toward another person with object in hand = the *offering* variant | P+D | reach-to-grasp chain; handovers/offering — Strabala et al., JHRI 2013 | high | ⬜ |
+| 7 | **approach / depart** (transition) | normalised person↔target (object/person/camera) distance decreases/increases monotonically beyond a threshold within a ~3 s window | P(+D) | ？ | med | ⬜ |
+| 8 | **lean-in / hover-over** (engagement posture) | torso pitch (mid-shoulder→mid-hip vs vertical) tilted >15° toward an object/desk, sustained | P(+D) | Postural immediacy / lean | med | ⬜ |
+| 9 | **hands-on / manipulating** (person–object contact) | wrist keypoint inside an object box (or within 0.1×diag of its edge) sustained ≥1 s; wrist extended toward another person with object in hand = the *offering* variant | P+D | ？ | high | ⬜ |
 | 10 | **gathering / co-presence** (group state) | person count crosses a threshold (0→1, 1→2, ≥3 forming a cluster: pairwise distances < social zone) | P or D | Gatherings / face engagements — **Goffman 1963** (Behavior in Public Places) | high | ⬜ |
-| 11 | **turn-taking / control handoff** (person ↔ person, via artifact) | the person whose wrist is inside / nearest the shared artifact's box "holds control" (sustained ≥1 s); a HANDOFF = the controlling person changes | P+D | Turn-taking — **Sacks, Schegloff & Jefferson 1974**; regulators — **Ekman & Friesen 1969** | med (needs cross-frame state, like row 7) | ⬜ |
+| 11 | **turn-taking / control handoff** (person ↔ person, via artifact) | the person whose wrist is inside / nearest the shared artifact's box "holds control" (sustained ≥1 s); a HANDOFF = the controlling person changes | P+D | Turn-taking | med (needs cross-frame state, like row 7) | ⬜ |
 
 ✅ = implemented & unit-tested (gaze.py) ⬜ = to build (5/9/10 easy geometry; 6/7/8 medium; 7 needs cross-frame state)
 
