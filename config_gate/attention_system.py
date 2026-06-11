@@ -19,8 +19,9 @@ Run:
 """
 
 from __future__ import annotations
-import argparse, json, math, os, time
+import argparse, json, math, os, subprocess, sys, time
 import cv2
+import numpy as np
 
 from perceive import make_detector
 from planner import plan, VOCAB, VOCAB_VERSION
@@ -30,6 +31,25 @@ from judge import judge as run_judge, ReportabilityTaste
 from gaze import (draw_text, draw_box, draw_arrow, draw_circle, draw_panel,
                   C_GREEN, C_RED, C_YELLOW, C_ORANGE, C_MAGENTA, C_CYAN, C_WHITE)
 from attention_demo import frame_source, publish
+
+
+def beep():
+    """Audible 'noticed' cue (tests are hard to watch while acting). macOS only; silent no-op elsewhere."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def make_strip(shots, height=300):
+    """The comic strip: N shots -> one horizontal story image."""
+    tiles = []
+    for s in shots:
+        h, w = s.shape[:2]
+        tiles.append(cv2.resize(s, (max(1, int(w * height / h)), height)))
+    return np.hstack(tiles)
 
 
 def read_context(path, fallback):
@@ -74,6 +94,11 @@ def main():
     ap.add_argument("--cooldown", type=float, default=60.0, help="habituation per entry (s)")
     ap.add_argument("--confirm", action="store_true",
                     help="VLM double-checks the frame when an entry fires (judge confirm)")
+    ap.add_argument("--burst-n", type=int, default=5,
+                    help="shots per story burst after an entry fires (comic-strip record)")
+    ap.add_argument("--burst-interval", type=float, default=1.5,
+                    help="seconds between burst shots (taken only while the entry still holds)")
+    ap.add_argument("--no-sound", action="store_true", help="disable the audible 'noticed' cue")
     ap.add_argument("--worth", type=float, default=0.0,
                     help="with --confirm: min reportability worth to record")
     ap.add_argument("--offline", action="store_true", help="fake planner/judge, no API key")
@@ -141,6 +166,7 @@ def main():
         os.makedirs(args.feed_dir, exist_ok=True)
         rel_log = open(os.path.join(args.feed_dir, "relation_log.jsonl"), "a")
     banner = None
+    bursts = []                                   # open story bursts (entries mid-narrative)
 
     import itertools
     for fr in itertools.chain([first], frames):
@@ -176,7 +202,7 @@ def main():
             rel_log.write(json.dumps({"t": round(t, 2),
                                       "truth": {k: int(v) for k, v in truth.items()}}) + "\n")
 
-        for e in fired:                                   # ---- a watched moment ----
+        for e in fired:                                   # ---- a watched moment opens a STORY ----
             label = e["label"]
             rec_ok, note, worth = True, label, None
             if args.confirm:
@@ -189,16 +215,34 @@ def main():
                 if not r["confirmed"]:
                     print(f"[VETO ] {label} :: {note}")
                     banner = (t + 3, f"VLM veto: {label}", C_RED)
-            if rec_ok:
-                print(f"[MOMENT] {label}" + (f" worth={worth:.2f}" if worth is not None else "")
-                      + f" :: {note}")
+            if rec_ok:                                    # burst: keep shooting while it unfolds
+                beep() if not args.no_sound else None
+                print(f"[STORY ] {label} — burst opened")
+                banner = (t + 3, f"watching: {label}", C_CYAN)
+                bursts.append({"label": label, "idx": executor.entries.index(e),
+                               "shots": [fr.copy()], "next": t + args.burst_interval,
+                               "note": note, "worth": worth,
+                               "truth": {k: int(v) for k, v in truth.items()}})
+
+        # ---- advance open bursts; on completion publish the comic strip, then 'bored' ----
+        for b in list(bursts):
+            st_ = statuses[b["idx"]]
+            if (t >= b["next"] and len(b["shots"]) < args.burst_n and st_.satisfied):
+                b["shots"].append(fr.copy())
+                b["next"] = t + args.burst_interval
+            if len(b["shots"]) >= args.burst_n or (not st_.satisfied and t >= b["next"]):
+                bursts.remove(b)
+                n = len(b["shots"])
+                note = f"{b['note']} ({n}-shot story)"
+                print(f"[MOMENT] {b['label']} :: {note} -> bored, cooling")
                 banner = (t + 5, note, C_GREEN)
                 fid = time.strftime("%Y%m%d_%H%M%S")
-                rec = {"time": time.strftime("%H:%M:%S"), "worth": worth if worth is not None else "—",
+                rec = {"time": time.strftime("%H:%M:%S"),
+                       "worth": b["worth"] if b["worth"] is not None else "—",
                        "why": "watch-spec", "note": note, "thumb": f"thumb_{fid}.jpg",
-                       "frame": f"frame_{fid}.jpg", "label": label,
-                       "truth": {k: int(v) for k, v in truth.items()}}
-                publish(fr, rec, args, UI)
+                       "frame": f"frame_{fid}.jpg", "label": b["label"], "shots": n,
+                       "truth": b["truth"]}
+                publish(make_strip(b["shots"]), rec, args, UI)
 
         # ---- overlay ----
         for d in viz["dets"]:
