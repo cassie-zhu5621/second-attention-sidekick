@@ -30,7 +30,7 @@ The VLM is a **compiler and auditor, not the runtime**: it never runs per frame.
  optional: VLM confirm step re-checks the frame before recording (--confirm)
 ```
 
-The vocabulary is **literature-grounded** (Hall, Kendon, Goffman, …) and versioned —
+The vocabulary is versioned —
 see `config_gate/docs/relation_table.md`. A preliminary study (`studies/planner_study.py`, results in
 `config_gate/results/`) validated the context→spec mapping and drove vocabulary v1→v2.
 
