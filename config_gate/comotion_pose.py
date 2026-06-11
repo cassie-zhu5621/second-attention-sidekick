@@ -83,42 +83,27 @@ class CoMotionPoseEstimator:
 
     # ------------------------------------------------------------------ #
     def _extract_people(self, detection, track, K, hw) -> List[PersonPose]:
-        """THE single adjustment point. Strategy: take SMPL params per tracked person,
-        decode to 3D joints with the model's smpl_decoder, project to 2D with K."""
-        torch = self.torch
+        """TrackTensorState carries projected 2D joints DIRECTLY (track.pred_2d,
+        shape (1, max_tracks, 27, 2), zero-padded; 27 = 'joints_face' = 24 SMPL + 3 aux).
+        Valid slots: betas nonzero and id > 0 (their padding/cleanup convention)."""
         out: List[PersonPose] = []
         try:
-            ids = track.id.reshape(-1).long()
-            pose = track.pose.reshape(len(ids), -1)
-            trans = track.trans.reshape(len(ids), -1)
-            betas = track.betas.reshape(len(ids), -1)
+            ids = track.id[0, :, 0]                 # (T,)
+            betas = track.betas[0]                  # (T, 10)
+            p2d = track.pred_2d[0]                  # (T, 27, 2)
+            trans = track.trans[0]                  # (T, 3) — camera-frame position
         except Exception as e:
             print(f"[comotion] track unpack failed ({e}) — check the probe dump")
             return out
-        if len(ids) == 0:
-            return out
-        try:
-            smpl = self.model.smpl_decoder
-            joints = smpl(betas=betas, pose=pose, trans=trans)      # may differ; see dump
-            if isinstance(joints, (tuple, list)):
-                joints = joints[-1]                                  # commonly (verts, joints)
-        except TypeError:
-            joints = self.model.smpl_decoder(betas, pose, trans)
-        joints = joints.reshape(len(ids), -1, 3)
-        Km = K.reshape(3, 3).to(joints.dtype)
-        for n in range(len(ids)):
+        valid = (betas != 0).any(-1) & (ids > 0)
+        for n in valid.nonzero().flatten().tolist():
             pid = int(ids[n])
-            if pid < 0 or not bool((betas[n] != 0).any()):
-                continue
-            j3 = joints[n]                                           # (J, 3) camera coords
-            uvw = (Km @ j3.T).T
-            uv = (uvw[:, :2] / uvw[:, 2:3].clamp(min=1e-6)).cpu().numpy()
+            uv = p2d[n].cpu().numpy()
             pts = {lm: (float(uv[sj, 0]), float(uv[sj, 1]))
                    for sj, lm in _SMPL2LM.items() if sj < len(uv)}
             if len(pts) < len(_SMPL2LM):
                 continue
-            pelvis = j3[0]
-            self.pos3d[pid] = tuple(float(v) for v in pelvis.cpu())
+            self.pos3d[pid] = tuple(float(v) for v in trans[n].cpu())
             out.append(PersonPose(pid=pid, pts=pts, vis={k: 1.0 for k in pts}))
         return out
 
