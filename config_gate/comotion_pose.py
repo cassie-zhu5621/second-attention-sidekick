@@ -143,6 +143,46 @@ class CoMotionPoseEstimator:
         pass
 
 
+class AsyncCoMotionPoseEstimator:
+    """Non-blocking wrapper (the probe's async pattern, packaged for the engine):
+    inference runs in a background thread on the LATEST frame only; estimate() returns
+    the most recent COMPLETED result immediately. The live loop stays at camera rate
+    while skeletons update at CoMotion speed (~3fps) — poses are ≤ ~0.3s stale, which
+    is irrelevant for relations judged on a seconds timescale."""
+
+    def __init__(self, **kw):
+        import threading
+        self._inner = CoMotionPoseEstimator(**kw)
+        self._lock = threading.Lock()
+        self._frame = None
+        self._people: List[PersonPose] = []
+        self.last_raw: List[Tuple[int, np.ndarray]] = []
+        self.pos3d = self._inner.pos3d
+        self._stop = False
+        threading.Thread(target=self._work, daemon=True).start()
+
+    def _work(self):
+        import time as _t
+        while not self._stop:
+            with self._lock:
+                fr, self._frame = self._frame, None
+            if fr is None:
+                _t.sleep(0.005)
+                continue
+            people = self._inner.estimate(fr)
+            with self._lock:
+                self._people = people
+                self.last_raw = list(self._inner.last_raw)
+
+    def estimate(self, frame_bgr) -> List[PersonPose]:
+        with self._lock:
+            self._frame = frame_bgr.copy()
+            return list(self._people)
+
+    def close(self):
+        self._stop = True
+
+
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     import argparse, time

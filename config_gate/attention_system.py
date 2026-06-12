@@ -294,6 +294,13 @@ def main():
             x1, y1, x2, y2 = map(int, d.box)
             cv2.rectangle(fr, (x1, y1), (x2, y2), (160, 160, 160), 1)
             draw_text(fr, d.label, (x1, y1 - 6), (200, 200, 200), 0.5, 1)
+        raw = getattr(engine.poses, "last_raw", None)
+        if raw:                                       # comotion backend: full skeletons
+            from comotion_pose import SMPL_EDGES
+            for pid_, uv_ in raw:
+                for a_, b_ in SMPL_EDGES:
+                    cv2.line(fr, (int(uv_[a_, 0]), int(uv_[a_, 1])),
+                             (int(uv_[b_, 0]), int(uv_[b_, 1])), (60, 230, 60), 2)
         for p in viz["people"]:
             draw_box(fr, p.box, C_CYAN, 2)
             draw_text(fr, f"p{p.pid}", (p.box[0], p.box[1] - 10), C_CYAN, 0.6, 1)

@@ -152,8 +152,8 @@ class RelationEngine:
         self.det = detector
         self.faces = HeadPoseEstimator(max_faces=max_people)   # face/gaze ALWAYS MediaPipe
         if pose_backend == "comotion":                          # experimental 3D backend
-            from comotion_pose import CoMotionPoseEstimator
-            self.poses = CoMotionPoseEstimator()
+            from comotion_pose import AsyncCoMotionPoseEstimator
+            self.poses = AsyncCoMotionPoseEstimator()           # non-blocking: loop stays live
         else:
             self.poses = PoseEstimator(max_people=max_people)
         self.tracker = Tracker()
