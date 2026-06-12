@@ -163,13 +163,25 @@ class AsyncCoMotionPoseEstimator:
 
     def _work(self):
         import time as _t
+        import traceback
+        announced = False
         while not self._stop:
             with self._lock:
                 fr, self._frame = self._frame, None
             if fr is None:
                 _t.sleep(0.005)
                 continue
-            people = self._inner.estimate(fr)
+            try:
+                people = self._inner.estimate(fr)
+            except Exception:
+                print("[comotion] ASYNC WORKER ERROR (inference skipped):")
+                traceback.print_exc()
+                _t.sleep(1.0)
+                continue
+            if not announced:
+                print(f"[comotion] async worker live — first inference done "
+                      f"({len(people)} people)")
+                announced = True
             with self._lock:
                 self._people = people
                 self.last_raw = list(self._inner.last_raw)
