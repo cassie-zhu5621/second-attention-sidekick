@@ -1,5 +1,4 @@
-# Setup & Commands — complete reference
-*(everything needed to run every test on a fresh machine; keep in English, record-bound)*
+# Setup & Commands
 
 ## 1. One-time setup on a new machine
 
