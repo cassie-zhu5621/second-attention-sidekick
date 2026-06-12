@@ -154,8 +154,11 @@ class RelationEngine:
         if pose_backend == "comotion":                          # experimental 3D backend
             from comotion_pose import AsyncCoMotionPoseEstimator
             self.poses = AsyncCoMotionPoseEstimator()           # non-blocking: loop stays live
+            print("[pose] backend = COMOTION (async; skeletons appear after first "
+                  "inference, ~20-30s incl. CoreML warmup)")
         else:
             self.poses = PoseEstimator(max_people=max_people)
+            print("[pose] backend = mediapipe")
         self.tracker = Tracker()
         self.tol_gaze, self.tol_mutual = tol_gaze, tol_mutual
         self.approach_win_s, self.approach_frac = approach_win_s, approach_frac
