@@ -26,7 +26,10 @@ MODEL = os.environ.get("SECONDATTN_PLANNER_MODEL", "claude-sonnet-4-6")
 
 # One line per row — the planner sees THIS summary of relation_table.md. Keep the wording
 # in sync with the table; these strings are part of what the study studies.
-VOCAB_VERSION = "v2"   # v2 (2026-06-10): +row 11, from the plan-time probe (turn-taking, 14 mentions)
+VOCAB_VERSION = "v2.1"  # v2.1 (2026-06-14): disambiguate gathering(10)=group-size-change vs approach(7)=
+                        #   single person toward a place; rebalanced examples so 'comes to my desk' picks 7.
+                        #   (v3 reserved for the big survey-driven scenario update.)
+                        # v2 (2026-06-10): +row 11, from the plan-time probe (turn-taking, 14 mentions)
 VOCAB = {
     1:  "gazing-at — a person's head orientation is directed at an object",
     2:  "joint-attention — two or more people look at the same target",
@@ -37,7 +40,7 @@ VOCAB = {
     7:  "approach/depart — a person is moving toward or away from an object, a person, or the robot",
     8:  "lean-in — a person leans their torso toward an object or work surface (engagement posture)",
     9:  "hands-on — a person's hand is on / manipulating an object",
-    10: "gathering — the number of co-present people changes (someone arrives/leaves, a group forms)",
+    10: "gathering — the NUMBER of co-present people changes / a group forms (use this for group size, NOT for one person; for a single person coming toward a place or object, use approach(7))",
     11: "turn-taking — control of a shared artifact (keyboard, tool, object) passes from one person to another",
 }
 
@@ -45,11 +48,12 @@ VOCAB = {
 # triple), so the examples neither leak answers to the study scenarios nor anchor the
 # model to one composition size.
 _FEWSHOT_SHAPES = """Examples of watchable moments (compositions and their meanings):
-- [10] alone — someone arrives; in some contexts arrival by itself is the news
+- [7] alone — a person approaches a specific place or object (e.g. comes to a desk)
 - [5, 3] — close to the robot AND looking at it — seeking interaction
 - [2, 4] — joint attention AND pointing — showing something to each other
-- [10, 6, 1] — an arrival AND a face-to-face formation AND gazing at the same thing — an introduction
-Compose freely: singles, pairs, or triples — whatever the context actually calls for."""
+- [10, 6, 1] — the group grows (someone joins) AND a face-to-face formation AND gazing at the same thing — an introduction
+Compose freely: singles, pairs, or triples — whatever the context actually calls for.
+Pick the MOST SPECIFIC relation for the context: 'comes to my desk' is approach(7), not gathering(10)."""
 
 _SCHEMA_COMMON = ('"single_ok": [<ids that alone are worth recording, may be empty>], '
                   '"duration_s": <how long to keep this plan, 60-14400>, '

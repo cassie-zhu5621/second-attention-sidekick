@@ -51,16 +51,16 @@ from collections import Counter
 from planner import plan, validate, canonical, ops_used, VOCAB, VOCAB_VERSION, MODEL
 
 SCENARIOS = {
-    "assembly":   "Two of us are assembling a robot arm at the workbench this afternoon.",
-    "guest":      "I'm expecting a guest to arrive at the studio within the next hour.",
-    "solo-work":  "I'm working alone on my thesis. Only people matter; ignore objects.",
-    "lunch":      "It's lunch break; people drift in and out and chat around the table.",
-    "demo-day":   "Open-lab demo day: visitors walk around and look at the exhibits.",
-    "pair-prog":  "My labmate and I are pair-programming at one screen.",
+    "assembly":   "Two of us are assembling something at the workbench this afternoon.",
+    "guest":      "I'm expecting the guests to arrive.",
+    "solo-work":  "I'm working alone; only people matter, ignore objects.",
+    "lunch":      "It's lunch break; people drift in and out and chat.",
+    "demo-day":   "Open-lab demo day: visitors walk around and look at exhibits.",
+    "pair-prog":  "My labmate and I are collaborating at one screen.",
     "entrance":   "Watch the entrance and tell me when someone comes in.",
-    "fragile":    "I left a fragile prototype on the desk; I care about anyone handling it.",
-    "rehearsal":  "We're rehearsing a presentation: one person presents, the others listen.",
-    "quiet":      "A quiet reading corner in the evening; nothing much should happen.",
+    "fragile":    "I left a prototype on the desk; I care about anyone handling it.",
+    "rehearsal":  "We're doing presentation practice: students present, the faculties listen.",
+    "quiet":      "A quiet corner in the evening; nothing much should happen.",
 }
 
 

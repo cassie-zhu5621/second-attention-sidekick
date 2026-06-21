@@ -60,6 +60,7 @@ class GazeRay:
     fwd: Optional[Tuple[float, float, float]] = None  # 3D face-forward, CAMERA coords (for eye-contact)
     pos: Optional[Tuple[float, float, float]] = None  # 3D head position (solvePnP tvec, model-mm)
     score: float = 1.0
+    coarse: bool = False               # True = from Pose head landmarks (distance fallback, no 3D)
 
     def point_at(self, t: float) -> Tuple[float, float]:
         return (self.origin[0] + t * self.dir[0], self.origin[1] + t * self.dir[1])
@@ -131,8 +132,9 @@ class HeadPoseEstimator:
             base_options=mp_tasks.BaseOptions(model_asset_path=_ensure_model("face_landmarker.task")),
             running_mode=vision.RunningMode.VIDEO,
             num_faces=max_faces,
-            min_face_detection_confidence=min_conf,
-            min_tracking_confidence=min_conf))
+            min_face_detection_confidence=0.3,        # lower -> keeps small/distant faces longer
+            min_face_presence_confidence=0.3,
+            min_tracking_confidence=0.3))
         self._ts = 0
 
     def estimate(self, frame_bgr: np.ndarray) -> List[GazeRay]:
@@ -296,6 +298,34 @@ def eye_contact(ray: GazeRay, tol_deg: float = 12.0) -> Optional[dict]:
     return {"angle": angle} if angle <= tol_deg else None
 
 
+# Pose-landmark indices for the head (BlazePose): nose, eyes, ears.
+_HEAD_LMS = {"nose": 0, "eye_l": 2, "eye_r": 5, "ear_l": 7, "ear_r": 8}
+
+
+def pose_head_ray(pose, min_vis: float = 0.3) -> Optional[GazeRay]:
+    """DISTANCE FALLBACK: a coarse head-orientation ray from Pose head landmarks (nose + ears),
+    for when FaceMesh loses a small/far face. Pose detects heads much farther than FaceMesh.
+    Direction ≈ nose relative to the ear midpoint (cheap, mostly yaw — enough for gazing-at /
+    joint-attention, which are mainly horizontal). No 3D, so eye_contact skips these."""
+    nose, el, er = pose[0], pose[7], pose[8]
+    if nose[2] < min_vis or (el[2] < min_vis and er[2] < min_vis):
+        return None
+    # ear midpoint from whichever ears are visible
+    ears = [e for e in (el, er) if e[2] >= min_vis]
+    mx = sum(e[0] for e in ears) / len(ears); my = sum(e[1] for e in ears) / len(ears)
+    dx, dy = nose[0] - mx, nose[1] - my
+    n = math.hypot(dx, dy)
+    if n < 1e-6:
+        return None
+    dx, dy = dx / n, dy / n
+    head_w = abs(el[0] - er[0]) if (el[2] >= min_vis and er[2] >= min_vis) else 40.0
+    hw = max(head_w, 30.0)
+    box = (nose[0] - hw, nose[1] - hw, nose[0] + hw, nose[1] + hw)
+    yaw = math.degrees(math.atan2(dx, max(1e-6, abs(dy)) if dy >= 0 else -abs(dy)))
+    return GazeRay(origin=(float(nose[0]), float(nose[1])), dir=(float(dx), float(dy)),
+                   yaw=float(yaw), pitch=0.0, face_box=box, fwd=None, pos=None, coarse=True)
+
+
 # --------------------------------------------------------------------------- #
 # relation #4: reaching / pointing  (arm ray — second DIRECTION source)
 # --------------------------------------------------------------------------- #
@@ -333,6 +363,33 @@ def arm_ray_from_points(shoulder: Tuple[float, float], elbow: Tuple[float, float
 
 _ARM_LMS = {"left": (11, 13, 15), "right": (12, 14, 16)}     # shoulder, elbow, wrist
 
+# MediaPipe BlazePose 33-landmark skeleton edges (face simplified) — for the --skeleton overlay.
+POSE_CONNECTIONS = [
+    (0, 2), (2, 7), (0, 5), (5, 8),                          # eyes -> ears
+    (9, 10),                                                  # mouth
+    (11, 12), (11, 23), (12, 24), (23, 24),                  # torso
+    (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),        # left arm + hand
+    (12, 14), (14, 16), (16, 18), (16, 20), (16, 22),        # right arm + hand
+    (23, 25), (25, 27), (27, 29), (27, 31),                  # left leg + foot
+    (24, 26), (26, 28), (28, 30), (28, 32),                  # right leg + foot
+]
+# distinct colors per detected person, so two skeletons on ONE body show as two colors.
+PERSON_COLORS = [(0, 255, 0), (0, 180, 255), (255, 0, 255), (0, 255, 255),
+                 (255, 128, 0), (180, 0, 255)]
+
+
+def draw_pose_skeleton(img, pose, color, min_vis=0.3, thick=9):
+    """Draw one person's full MediaPipe skeleton: pose = [(x_px,y_px,vis)x33]."""
+    import cv2
+    jr = max(3, thick // 2)                          # joint dot scales with line weight
+    for a, b in POSE_CONNECTIONS:
+        if a < len(pose) and b < len(pose) and pose[a][2] >= min_vis and pose[b][2] >= min_vis:
+            cv2.line(img, (int(pose[a][0]), int(pose[a][1])),
+                     (int(pose[b][0]), int(pose[b][1])), color, thick, cv2.LINE_AA)
+    for x, y, v in pose:
+        if v >= min_vis:
+            cv2.circle(img, (int(x), int(y)), jr, color, -1, cv2.LINE_AA)
+
 
 class ArmRayEstimator:
     """frame (BGR) -> List[ArmRay].  Tasks-API PoseLandmarker, num_poses>1 — MULTI-person
@@ -340,7 +397,8 @@ class ArmRayEstimator:
     is what two-person pointing / 'offering' scenarios need."""
 
     def __init__(self, max_people: int = 4, min_conf: float = 0.5,
-                 min_extension_deg: float = 140.0, min_visibility: float = 0.5):
+                 min_extension_deg: float = 140.0, min_visibility: float = 0.5,
+                 smooth: float = 0.5):
         mp, mp_tasks, vision = _mp_vision()
         self._mp = mp
         self._lm = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
@@ -348,11 +406,15 @@ class ArmRayEstimator:
             running_mode=vision.RunningMode.VIDEO,
             num_poses=max_people,
             min_pose_detection_confidence=min_conf,
-            min_tracking_confidence=min_conf))
+            min_pose_presence_confidence=0.3,   # lower -> stops the person flickering OUT when still
+            min_tracking_confidence=0.3))       # lower -> keeps the track alive between detections
         self._ts = 0
         self.min_extension_deg = min_extension_deg
         self.min_visibility = min_visibility
+        self.smooth = smooth                    # EMA factor: new = smooth*new + (1-smooth)*prev (lower=smoother)
+        self._prev: List[list] = []             # previous smoothed poses, for temporal smoothing
         self.last_debug: List[dict] = []   # per shoulder/elbow/wrist (for --skeleton): pts, vis, angle
+        self.last_poses: List[list] = []   # full per-person landmark skeletons (for --skeleton)
 
     def estimate(self, frame_bgr: np.ndarray) -> List[ArmRay]:
         import cv2
@@ -361,14 +423,28 @@ class ArmRayEstimator:
                              data=cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
         self._ts += 33
         res = self._lm.detect_for_video(img, self._ts)
+        # raw poses in pixels: per person [(x,y,vis) x 33]
+        raw = [[(lm.x * W, lm.y * H, getattr(lm, "visibility", 1.0) or 1.0) for lm in person]
+               for person in (res.pose_landmarks or [])]
+        # TEMPORAL SMOOTHING (EMA): a still person's landmarks stop jittering frame to frame.
+        # matched by person index (stable for 1 person; good enough for the debug view).
+        a = self.smooth
+        sm = []
+        for i, pose in enumerate(raw):
+            if i < len(self._prev) and len(self._prev[i]) == len(pose):
+                prev = self._prev[i]
+                pose = [(a * x + (1 - a) * px, a * y + (1 - a) * py, v)
+                        for (x, y, v), (px, py, _) in zip(pose, prev)]
+            sm.append(pose)
+        self._prev = sm
+        self.last_poses = sm
+
         out: List[ArmRay] = []
         self.last_debug = []
-        for person in (res.pose_landmarks or []):    # one landmark list per detected person
+        for pose in sm:                              # arm rays from the SMOOTHED landmarks
             for side, (s, e, w) in _ARM_LMS.items():
-                vis = min(getattr(person[i], "visibility", 1.0) or 1.0 for i in (s, e, w))
-                sp = (person[s].x * W, person[s].y * H)
-                ep = (person[e].x * W, person[e].y * H)
-                wp = (person[w].x * W, person[w].y * H)
+                vis = min(pose[s][2], pose[e][2], pose[w][2])
+                sp, ep, wp = pose[s][:2], pose[e][:2], pose[w][:2]
                 v1 = (sp[0] - ep[0], sp[1] - ep[1]); v2 = (wp[0] - ep[0], wp[1] - ep[1])
                 n1 = math.hypot(*v1); n2 = math.hypot(*v2)
                 ang = (math.degrees(math.acos(max(-1.0, min(1.0,
@@ -422,23 +498,16 @@ def joint_attention(rays: List[GazeRay], image_wh: Tuple[int, int],
 
 
 # --------------------------------------------------------------------------- #
-# bold overlay helpers — climbing-app legibility, NEON strokes: lines/boxes get a
-# wide dim same-color halo + bright core (no black edges); text keeps a black
-# outline (glyphs need it over clutter). Module-level so robot_demo/web_demo can
-# reuse the same look later.
+# overlay helpers — solid palette-coloured strokes, NOTHING layered on top: a
+# single stroke in the EXACT palette colour (no dim halo, no lightened hot core),
+# so a thick line keeps the true colour-card hue instead of washing out. Text
+# keeps a thin dark outline only because glyphs are otherwise unreadable over
+# video clutter. Module-level so the demos reuse the same look.
 # --------------------------------------------------------------------------- #
-def _dim(color, f=0.40):
-    return tuple(int(c * f) for c in color)
-
-
-def _lift(color, f=0.55):
-    return tuple(int(c + (255 - c) * f) for c in color)
-
-
 def draw_text(img, txt, org, color, scale=0.9, thick=2):
     import cv2
     x, y = int(org[0]), int(org[1])
-    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0),
+    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, _BG,
                 thick + 4, cv2.LINE_AA)
     cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color,
                 thick, cv2.LINE_AA)
@@ -447,25 +516,19 @@ def draw_text(img, txt, org, color, scale=0.9, thick=2):
 def draw_box(img, box, color, thick=4):
     import cv2
     x1, y1, x2, y2 = map(int, box)
-    cv2.rectangle(img, (x1, y1), (x2, y2), _dim(color), thick + 5)       # halo
-    cv2.rectangle(img, (x1, y1), (x2, y2), color, thick)                 # body
-    cv2.rectangle(img, (x1, y1), (x2, y2), _lift(color), max(1, thick - 3))  # hot core
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, thick)
 
 
 def draw_arrow(img, p1, p2, color, thick=4):
     import cv2
     p1 = (int(p1[0]), int(p1[1])); p2 = (int(p2[0]), int(p2[1]))
-    cv2.arrowedLine(img, p1, p2, _dim(color), thick + 5, cv2.LINE_AA, tipLength=0.04)
     cv2.arrowedLine(img, p1, p2, color, thick, cv2.LINE_AA, tipLength=0.04)
-    cv2.arrowedLine(img, p1, p2, _lift(color), max(1, thick - 3), cv2.LINE_AA, tipLength=0.04)
 
 
 def draw_circle(img, c, radius, color, thick=4):
     import cv2
     c = (int(c[0]), int(c[1]))
-    cv2.circle(img, c, radius, _dim(color), thick + 5, cv2.LINE_AA)
     cv2.circle(img, c, radius, color, thick, cv2.LINE_AA)
-    cv2.circle(img, c, radius, _lift(color), max(1, thick - 3), cv2.LINE_AA)
 
 
 def draw_panel(img, lines, org=(16, 16), scale=0.85):
@@ -478,16 +541,23 @@ def draw_panel(img, lines, org=(16, 16), scale=0.85):
     w = max(cv2.getTextSize(t, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)[0][0] for t, _ in lines)
     x, y = org
     over = img.copy()
-    cv2.rectangle(over, (x, y), (x + w + 2 * pad, y + lh * len(lines) + pad), (0, 0, 0), -1)
+    cv2.rectangle(over, (x, y), (x + w + 2 * pad, y + lh * len(lines) + pad), _BG, -1)
     cv2.addWeighted(over, 0.55, img, 0.45, 0, img)
     for k, (t, col) in enumerate(lines):
         draw_text(img, t, (x + pad, y + pad + lh * k + int(22 * scale)), col, scale)
 
 
-# bold palette (BGR)
-C_GREEN, C_RED = (60, 230, 60), (60, 60, 255)
-C_YELLOW, C_ORANGE = (0, 230, 255), (0, 150, 255)
-C_MAGENTA, C_CYAN, C_WHITE = (255, 60, 255), (255, 210, 60), (255, 255, 255)
+# overlay palette (BGR) — mirrors the web UI palette:
+#   #A1CC48 light green · #D9E157 yellow-green · #D95B5B red · #E89D9D light red
+#   · #88E4EA blue · #262626 near-black background
+_BG = (38, 38, 38)                       # #262626 — text outline / panel fill
+C_GREEN  = (72, 204, 161)                # #A1CC48 light green — person / structure / "noticed"
+C_RED    = (91, 91, 217)                 # #D95B5B red — satisfied / veto
+C_YELLOW = (87, 225, 217)                # #D9E157 yellow-green — a relation detected (pointing)
+C_ORANGE = (157, 157, 232)               # #E89D9D light red — cooling
+C_MAGENTA = (91, 91, 217)                # #D95B5B red — joint-attention moment circle
+C_CYAN   = (234, 228, 136)               # #88E4EA blue — attention rays / logic
+C_WHITE  = (228, 232, 232)               # #E8E8E4 near-white — neutral text
 
 
 # --------------------------------------------------------------------------- #
@@ -538,6 +608,19 @@ if __name__ == "__main__":
         arms = arm_est.estimate(fr) if arm_est else []
         dets = det.detect(fr) if det else []
 
+        # DISTANCE FALLBACK (B): FaceMesh drops small/far faces; add a coarse Pose head ray for any
+        # person the FaceMesh didn't cover. Near faces still use the precise FaceMesh ray (A).
+        if arm_est:
+            for pose in arm_est.last_poses:
+                hr = pose_head_ray(pose)
+                if hr is None:
+                    continue
+                thr = max(50.0, 0.5 * (hr.face_box[2] - hr.face_box[0]))
+                if any((not r.coarse) and math.hypot(r.origin[0] - hr.origin[0],
+                        r.origin[1] - hr.origin[1]) < thr for r in rays):
+                    continue                       # a FaceMesh ray already covers this head
+                rays.append(hr)
+
         panel = []                                              # active relations -> HUD panel
 
         for d in dets:                                          # detector boxes (thin, background)
@@ -545,26 +628,24 @@ if __name__ == "__main__":
             cv2.rectangle(fr, (x1, y1), (x2, y2), (160, 160, 160), 1)
             draw_text(fr, d.label, (x1, y1 - 6), (200, 200, 200), 0.55, 1)
 
-        if args.skeleton and arm_est:                           # debug: raw arm joints + angle
-            for dbg in arm_est.last_debug:
-                sp, ep, wp = (tuple(map(int, p)) for p in dbg["pts"])
-                ok_ext = dbg["angle"] >= arm_est.min_extension_deg
-                col = C_ORANGE if ok_ext else (140, 140, 255)   # orange=extended, blue=bent/won't fire
-                cv2.line(fr, sp, ep, col, 2); cv2.line(fr, ep, wp, col, 2)
-                for p in (sp, ep, wp):
-                    cv2.circle(fr, p, 5, col, -1)
-                draw_text(fr, f"{dbg['angle']:.0f}deg v{dbg['vis']:.1f}", (ep[0] + 6, ep[1]),
-                          col, 0.5, 1)
+        if args.skeleton and arm_est:                           # debug: FULL MediaPipe skeleton per person
+            for pid, pose in enumerate(arm_est.last_poses):     # each person a distinct color
+                col = PERSON_COLORS[pid % len(PERSON_COLORS)]   # -> two skeletons on one body = two colors
+                draw_pose_skeleton(fr, pose, col)
+                if pose and pose[0][2] >= 0.3:                  # label person index near the nose
+                    draw_text(fr, f"P{pid}", (int(pose[0][0]) + 6, int(pose[0][1]) - 6), col, 0.6, 2)
+            draw_text(fr, f"MediaPipe poses: {len(arm_est.last_poses)}", (12, 30), C_WHITE, 0.7, 2)
 
         for a in arms:                                          # arm rays (orange, thick)
             draw_arrow(fr, a.origin, a.point_at(0.5 * math.hypot(W, H)), C_ORANGE)
             draw_text(fr, f"{a.extension:.0f}", (a.origin[0] + 8, a.origin[1] + 24),
                       C_ORANGE, 0.7)
 
-        for r in rays:                                          # gaze rays (yellow, thick)
-            draw_arrow(fr, r.origin, r.point_at(0.6 * math.hypot(W, H)), C_YELLOW)
-            draw_text(fr, f"y{r.yaw:+.0f} p{r.pitch:+.0f}", (r.origin[0] + 10, r.origin[1] - 12),
-                      C_YELLOW, 0.55, 1)
+        for r in rays:                                          # gaze rays: yellow=FaceMesh, blue=far fallback
+            col = (255, 200, 90) if r.coarse else C_YELLOW
+            draw_arrow(fr, r.origin, r.point_at(0.6 * math.hypot(W, H)), col)
+            tag = "head~" if r.coarse else f"y{r.yaw:+.0f} p{r.pitch:+.0f}"
+            draw_text(fr, tag, (r.origin[0] + 10, r.origin[1] - 12), col, 0.55, 1)
 
         hits = gazing_at(rays, dets, tol_deg=args.tol) if dets else []
         for h in hits:                                          # relation #5: subject -> target

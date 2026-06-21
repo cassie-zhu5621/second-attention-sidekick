@@ -31,7 +31,7 @@ import numpy as np
 import os as _os
 CAM_URL     = _os.environ.get("SIDEKICK_CAM",      # per-session override: export SIDEKICK_CAM=http://<ip>/
                               "http://172.20.10.2/")  # ADJUST 1 (M5 MJPEG URL — changes with the network)
-SERIAL_PORT = "/dev/cu.usbmodem101"        # ADJUST 2 (use cu.* on mac)
+SERIAL_PORT = _os.environ.get("SIDEKICK_PORT", "/dev/cu.usbmodem101")  # ADJUST 2 (cu.* on mac)
 BAUD        = 115200                        # match pantilt_r4.ino
 
 # Calibration (measured on the lab rig):
@@ -83,24 +83,24 @@ class _MJPEGGrabber:
         return self
 
 
-class GimbalRig:
-    """Real hardware. move_to(pan,tilt) over serial; get_frame() from the M5 WiFi stream."""
+class ServoOnlyRig:
+    """Pan-tilt servos WITHOUT the camera link — move_to/nod/beep over serial only.
+    Use when frames come from elsewhere (USB webcam mounted on the head)."""
 
-    def __init__(self, cam_url=CAM_URL, port=SERIAL_PORT, baud=BAUD):
+    def __init__(self, port=SERIAL_PORT, baud=BAUD):
         import serial
         self.pan = 0.0
         self.tilt = 0.0
-        # CAMERA FIRST: confirm the M5 streams before we grab the serial port, so a camera
-        # problem never leaves the port held busy (saves a manual kill next run).
-        self.grab = _MJPEGGrabber(cam_url).start()
-        t0 = time.time()
-        while self.grab.latest is None and time.time() - t0 < 15:
-            time.sleep(0.1)
-        if self.grab.latest is None:
-            self.grab.stopped = True
-            raise RuntimeError(f"No frames from {cam_url} — is the M5 streaming on this network? "
-                               f"(check the IP + that you're on the same WiFi/hotspot; one viewer only)")
-        # then the servo board
+        # If the configured port is gone (Mac renames it when the USB socket changes),
+        # auto-pick the first /dev/cu.usbmodem* present.
+        import glob, os
+        if not os.path.exists(port):
+            found = sorted(glob.glob("/dev/cu.usbmodem*"))
+            if not found:
+                raise RuntimeError(f"servo port {port} not found and no /dev/cu.usbmodem* "
+                                   "present — is the R4 plugged in? (close Serial Monitor too)")
+            print(f"[rig] {port} missing -> using {found[0]}")
+            port = found[0]
         self.ser = serial.Serial(port, baud, timeout=1)
         time.sleep(2)                               # R4 resets when the port opens
 
@@ -112,16 +112,6 @@ class GimbalRig:
         self.ser.write(f"{int(round(cmd_pan))},{int(round(cmd_tilt))}\n".encode())  # board eases there
         self.pan, self.tilt = pan, tilt                          # remember LOGICAL pose
         time.sleep(dist * GLIDE_S_PER_DEG + SETTLE_S)            # wait out the glide
-
-    def get_frame(self):
-        """Return a frame captured AFTER this call (post-move), not a stale one."""
-        start_seq = self.grab.seq
-        t0 = time.time()
-        while self.grab.seq <= start_seq and time.time() - t0 < 5:
-            time.sleep(0.02)
-        if self.grab.latest is None:
-            raise RuntimeError("Lost the M5 stream")
-        return self.grab.latest.copy()
 
     def beep(self):
         """'Noticed' chirp on the rig's passive buzzer (firmware 'beep' command; D8)."""
@@ -138,6 +128,39 @@ class GimbalRig:
         base = self.tilt
         for _ in range(times):
             self.move_to(self.pan, base + depth); self.move_to(self.pan, base)  # +tilt = dip DOWN
+
+    def close(self):
+        try:
+            self.ser.write(b"off\n"); self.ser.close()
+        except Exception:
+            pass
+
+
+class GimbalRig(ServoOnlyRig):
+    """Servos + the M5 WiFi camera: move_to/nod/beep inherited, plus get_frame()."""
+
+    def __init__(self, cam_url=CAM_URL, port=SERIAL_PORT, baud=BAUD):
+        # CAMERA FIRST: confirm the M5 streams before we grab the serial port, so a camera
+        # problem never leaves the port held busy (saves a manual kill next run).
+        self.grab = _MJPEGGrabber(cam_url).start()
+        t0 = time.time()
+        while self.grab.latest is None and time.time() - t0 < 15:
+            time.sleep(0.1)
+        if self.grab.latest is None:
+            self.grab.stopped = True
+            raise RuntimeError(f"No frames from {cam_url} — is the M5 streaming on this network? "
+                               f"(check the IP + that you're on the same WiFi/hotspot; one viewer only)")
+        super().__init__(port, baud)
+
+    def get_frame(self):
+        """Return a frame captured AFTER this call (post-move), not a stale one."""
+        start_seq = self.grab.seq
+        t0 = time.time()
+        while self.grab.seq <= start_seq and time.time() - t0 < 5:
+            time.sleep(0.02)
+        if self.grab.latest is None:
+            raise RuntimeError("Lost the M5 stream")
+        return self.grab.latest.copy()
 
     def close(self):
         self.grab.stopped = True

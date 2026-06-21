@@ -19,70 +19,194 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STATE = {"jpg": None, "feed": [], "thumbs": {}, "frames": {},
          "context": "", "why": "", "entries": [],      # [(expr, label)]
-         "status": [],                                  # [(label, satisfied, cooling, detail)]
+         "status": [],                                  # [dict per entry: see build_status]
          "pending_context": None}
 LOCK = threading.Lock()
 ARGS = None
 
+# id -> short human name for the 11-row relation vocabulary (config_gate/docs/relation_table.md).
+# Shown in THE PLAN panel so an entry reads "3 eye-contact AND 5 proxemics", not "single:3".
+REL_NAMES = {
+    1: "gazing-at", 2: "joint-attn", 3: "eye-contact", 4: "pointing",
+    5: "proxemics", 6: "F-formation", 7: "approach/depart", 8: "lean-in",
+    9: "hands-on", 10: "gathering", 11: "turn-taking",
+}
+
+
+def build_status(statuses, entries, truth):
+    """Pack per-entry state for the UI: operator id groups + which rows are T this frame.
+
+    statuses : list[EntryStatus] from WatchExecutor.step
+    entries  : WatchExecutor.entries (each has all/any/not/then id lists + label)
+    truth    : {row_id: bool} for the current frame
+    """
+    out = []
+    for s, e in zip(statuses, entries):
+        ids = set(e["all"]) | set(e["any"]) | set(e["not"]) | set(e["then"])
+        out.append({
+            "label": s.label, "sat": bool(s.satisfied), "cool": bool(s.cooling),
+            "all": list(e["all"]), "any": list(e["any"]),
+            "not": list(e["not"]), "then": list(e["then"]),
+            "on": {str(r): bool(truth.get(r, False)) for r in ids},
+        })
+    return out
+
 PAGE = """<!doctype html><html><head><meta charset=utf-8><title>attention system</title>
 <style>
- body{margin:0;background:#0e0f12;color:#e8e8ea;font-family:ui-sans-serif,system-ui,sans-serif}
- .wrap{display:flex;gap:14px;padding:14px;box-sizing:border-box;height:calc(100vh - 28px)}
+ /* palette: #262626 black · #A1CC48 light green (main) · #D9E157 yellow-green
+    #334020 dark olive · #D95B5B red (satisfied) · #E89D9D light red (cooling)
+    · #88E4EA blue (lit trigger operators) */
+ body{margin:0;background:#262626;color:#e8e8e4;font-family:ui-sans-serif,system-ui,sans-serif}
+ .tabs{display:flex;gap:6px;padding:10px 14px 0}
+ .tab{background:#1d1d1d;border:1px solid #3a3a36;color:#9a9a90;border-radius:8px 8px 0 0;
+   padding:9px 18px;font-size:14px;font-weight:700;letter-spacing:.04em;cursor:pointer}
+ .tab.active{background:#262626;color:#A1CC48;border-color:#3a3a36;border-bottom-color:#262626}
+ .tab .badge{display:inline-block;margin-left:7px;min-width:16px;padding:0 6px;font-size:12px;
+   border-radius:9px;background:#334020;color:#D9E157;text-align:center}
+ .page{display:none}
+ .page.show{display:block}
+ .wrap{display:flex;gap:14px;padding:14px;box-sizing:border-box;height:calc(100vh - 64px)}
  .left{flex:2;min-width:0;display:flex;flex-direction:column;gap:10px}
- .right{flex:1;min-width:320px;display:flex;flex-direction:column;gap:10px}
- img#v{width:100%;border:1px solid #2a2d33;border-radius:10px;background:#000}
- h3{margin:4px 2px;font-size:13px;color:#9aa0a8;font-weight:600;letter-spacing:.04em}
- .plan{background:#16181d;border:1px solid #2a2d33;border-radius:10px;padding:10px}
- .ctx{font-size:13.5px;color:#e8e8ea}
- .why{font-size:12px;color:#00d0d0;margin-top:6px;font-style:italic}
- .entry{display:flex;gap:8px;align-items:baseline;margin-top:8px;font-size:13px}
- .dot{width:9px;height:9px;border-radius:50%;flex:none;background:#555}
- .dot.sat{background:#37ff8b}.dot.cool{background:#ff9b37}
- .expr{color:#c5a3ff;font-family:ui-monospace,monospace;font-size:12px}
- .detail{color:#8a909a;font-size:11px}
- .feed{flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px;padding-right:4px}
- .card{display:flex;gap:10px;background:#16181d;border:1px solid #2a2d33;border-radius:10px;padding:8px}
- .card img{width:96px;height:72px;object-fit:cover;border-radius:6px;flex:none;background:#000}
+ .right{flex:1.2;min-width:400px;display:flex;flex-direction:column;gap:10px}
+ img#v{width:100%;border:1px solid #3a3a36;border-radius:10px;background:#000}
+ h3{margin:4px 2px;font-size:13px;color:#A1CC48;font-weight:700;letter-spacing:.05em}
+ .plan{flex:1;overflow:auto;background:#1d1d1d;border:1px solid #3a3a36;border-radius:10px;padding:14px}
+ .ctx{font-size:28px;line-height:1.25;font-weight:600;color:#e8e8e4}
+ .why{font-size:16px;color:#A1CC48;margin:8px 0 4px;font-style:italic}
+ .entry{margin-top:16px;padding-top:14px;border-top:1px solid #3a3a36}
+ .entry:first-of-type{border-top:none}
+ /* the state header — bigger now */
+ .ehead{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+ .dot{width:13px;height:13px;border-radius:50%;flex:none;background:#5a5a52}
+ .dot.sat{background:#D95B5B;box-shadow:0 0 10px #D95B5B}.dot.cool{background:#E89D9D;box-shadow:0 0 9px #E89D9D}
+ .estate{font-size:21px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#9a9a90}
+ .estate.sat{color:#D95B5B}.estate.cool{color:#E89D9D}
+ .ecap{color:#7a7a70;font-size:17px}
+ /* the lit-up logic line — operators are the stars, bigger than relations */
+ .logic{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+ .rel{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:7px;
+   border:1px solid #334020;background:#2b2b2b;color:#9a9a90;font-size:17px;transition:all .12s}
+ .rel .rid{font-size:13px;color:#6a6a60;font-family:ui-monospace,monospace}
+ .rel.on{border-color:#D9E157;color:#262626;background:#D9E157;font-weight:600;
+   box-shadow:0 0 11px rgba(217,225,87,.5)}
+ .rel.on .rid{color:#334020}
+ /* operators = hollow rounded outline rings (connectors), never filled —
+    deliberately a different shape from the filled relation chips.
+    lit trigger = palette blue #88E4EA */
+ .op{font-family:ui-monospace,monospace;font-size:22px;font-weight:800;letter-spacing:.09em;
+   min-width:22px;text-align:center;padding:11px 18px;border-radius:999px;color:#8a8a80;
+   background:transparent;border:2px solid #5a5a52;line-height:1;text-transform:uppercase}
+ .op.lit{color:#88E4EA;border-color:#88E4EA;background:transparent;
+   box-shadow:0 0 13px rgba(136,228,234,.5);text-shadow:0 0 7px rgba(136,228,234,.5)}
+ .op.paren{border:none;color:#7a7a70;padding:7px 2px;font-size:28px;background:transparent}
+ .detail{color:#7a7a70;font-size:11px;margin-top:6px;font-family:ui-monospace,monospace}
+ /* feed gallery */
+ .feedwrap{padding:14px;box-sizing:border-box;height:calc(100vh - 64px);overflow:auto}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+ .card{display:flex;gap:10px;background:#1d1d1d;border:1px solid #3a3a36;border-radius:10px;padding:10px}
+ .card img{width:120px;height:90px;object-fit:cover;border-radius:6px;flex:none;background:#000}
  .note{font-size:13.5px;line-height:1.4}
- .meta{font-size:11px;color:#8a909a;margin-top:3px}
- input{width:100%;box-sizing:border-box;background:#16181d;border:1px solid #2a2d33;color:#e8e8ea;
-   border-radius:8px;padding:9px 11px;font-size:14px}
+ .meta{font-size:11px;color:#9a9a90;margin-top:3px}
+ .empty{color:#7a7a70;font-size:13px;padding:24px}
+ input{width:100%;box-sizing:border-box;background:#1d1d1d;border:1px solid #3a3a36;color:#e8e8e4;
+   border-radius:8px;padding:10px 12px;font-size:14px}
+ input:focus{outline:none;border-color:#A1CC48}
 </style></head><body>
-<div class=wrap>
- <div class=left>
-   <h3>LIVE</h3>
-   <img id=v src="/stream.mjpg">
- </div>
- <div class=right>
-   <h3>THE PLAN — what it watches for, and why</h3>
-   <div class=plan id=plan></div>
-   <h3>NOTICED — the feed</h3>
-   <div class=feed id=feed></div>
-   <div>
-     <h3>DESCRIBE THE SCENE — it will re-plan</h3>
-     <input id=c placeholder='e.g. "two of us are assembling a robot arm this afternoon"'>
-   </div>
+<div class=tabs>
+  <div class="tab active" id=tabLive onclick="showTab('live')">LIVE</div>
+  <div class="tab" id=tabFeed onclick="showTab('feed')">NOTICED <span class=badge id=fcount>0</span></div>
+</div>
+
+<div class="page show" id=pageLive>
+ <div class=wrap>
+  <div class=left>
+    <h3>LIVE</h3>
+    <img id=v src="/stream.mjpg">
+    <h3>DESCRIBE THE SCENE — it will re-plan</h3>
+    <input id=c placeholder='e.g. "two of us are assembling a robot arm this afternoon"'>
+  </div>
+  <div class=right>
+    <h3>THE PLAN — what it watches for, lit as it happens</h3>
+    <div class=plan id=plan></div>
+  </div>
  </div>
 </div>
+
+<div class=page id=pageFeed>
+ <div class=feedwrap>
+   <h3>NOTICED — the feed</h3>
+   <div class=grid id=feed></div>
+ </div>
+</div>
+
 <script>
+const REL = __REL_NAMES__;            // {id: "name"}
+function relChip(id, on){
+  const name = REL[id] || ('rel'+id);
+  return `<span class="rel ${on?'on':''}"><span class=rid>${id}</span>${name}</span>`;
+}
+function op(word, lit){ return `<span class="op ${lit?'lit':''}">${word}</span>`; }
+// Build the lit-up logic line for one watch entry from its operator id-groups + on-map.
+function compose(s){
+  const on = id => !!s.on[String(id)];
+  let parts = [];
+  if(s.then && s.then.length){                       // ordered sequence: a THEN b THEN c
+    const allOn = s.then.every(on);
+    s.then.forEach((id,i)=>{ if(i) parts.push(op('THEN', allOn)); parts.push(relChip(id, on(id))); });
+  } else {
+    if(s.all && s.all.length){
+      const allOn = s.all.every(on);
+      s.all.forEach((id,i)=>{ if(i) parts.push(op('AND', allOn)); parts.push(relChip(id, on(id))); });
+    }
+    if(s.any && s.any.length){
+      const anyOn = s.any.some(on);
+      if(parts.length) parts.push(op('AND', allLit(s)));
+      parts.push(op('ANY', anyOn)); parts.push(`<span class="op paren">(</span>`);
+      s.any.forEach((id,i)=>{ if(i) parts.push(op('OR', anyOn)); parts.push(relChip(id, on(id))); });
+      parts.push(`<span class="op paren">)</span>`);
+    }
+    if(s.not && s.not.length){
+      s.not.forEach(id=>{ parts.push(op('NOT', !on(id))); parts.push(relChip(id, on(id))); });
+    }
+  }
+  if(!parts.length) parts.push('<span class=detail>(no relations)</span>');
+  return `<div class=logic>${parts.join('')}</div>`;
+}
+function allLit(s){ return (s.all||[]).every(id=>!!s.on[String(id)]); }
+function caption(lbl){                                // turn "single:3" into a readable name
+  const m = /^single:(\\d+)$/.exec(lbl||'');
+  return m ? (REL[m[1]]||('rel'+m[1]))+' alone is worth recording' : (lbl||'');
+}
 async function poll(){
   try{
     let p=await (await fetch('/plan.json')).json();
     document.getElementById('plan').innerHTML =
       `<div class=ctx>${p.context||'(no context)'}</div>`+
       (p.why?`<div class=why>why: ${p.why}</div>`:'')+
-      p.status.map(s=>`<div class=entry>
-        <span class="dot ${s[1]?'sat':(s[2]?'cool':'')}"></span>
-        <span>${s[0]}</span><span class=detail>${s[3]||''}</span></div>`).join('');
+      (p.status||[]).map(s=>{
+        const state = s.sat?'<span class="estate sat">satisfied</span>'
+                     :(s.cool?'<span class="estate cool">cooling</span>':'<span class=estate>watching</span>');
+        return `<div class=entry>
+          <div class=ehead><span class="dot ${s.sat?'sat':(s.cool?'cool':'')}"></span>
+            ${state}<span class=ecap>${caption(s.label)}</span></div>
+          ${compose(s)}</div>`;
+      }).join('');
     let f=await (await fetch('/feed.json')).json();
-    document.getElementById('feed').innerHTML=f.map(m=>`<div class=card>
+    document.getElementById('fcount').textContent = f.length;
+    document.getElementById('feed').innerHTML = f.length ? f.map(m=>`<div class=card>
       <a href="/frame/${m.frame||''}" target="_blank" title="open the full story strip">
         <img src="/thumb/${m.thumb}"></a>
       <div><div class=note>${m.note||m.label||''}</div>
       <div class=meta>${m.label||''} · ${m.time} · <a href="/frame/${m.frame||''}"
         target="_blank" style="color:#00d0d0">full strip ↗</a></div></div>
-    </div>`).join('');
+    </div>`).join('') : '<div class=empty>nothing noticed yet</div>';
   }catch(e){}
+}
+function showTab(which){
+  document.getElementById('pageLive').classList.toggle('show', which==='live');
+  document.getElementById('pageFeed').classList.toggle('show', which==='feed');
+  document.getElementById('tabLive').classList.toggle('active', which==='live');
+  document.getElementById('tabFeed').classList.toggle('active', which==='feed');
 }
 document.getElementById('c').addEventListener('keydown',async e=>{
   if(e.key==='Enter'&&e.target.value.trim()){
@@ -91,7 +215,7 @@ document.getElementById('c').addEventListener('keydown',async e=>{
   }
 });
 setInterval(poll,1200); poll();
-</script></body></html>"""
+</script></body></html>""".replace("__REL_NAMES__", json.dumps(REL_NAMES))
 
 
 class H(BaseHTTPRequestHandler):

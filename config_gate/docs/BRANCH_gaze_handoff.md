@@ -1,3 +1,7 @@
+> ⚠️ SUPERSEDED — the current consolidated master is **`config_gate/PROJECT_HANDOFF.md`** (read that
+> first). Kept only for early gaze-branch history. (Note: robot_demo.py / attention_robot.py /
+> run_perception.py mentioned below were removed in the v1 cleanup — use `attention_system.py --rig`.)
+
 # Branch handoff — Gaze / Joint-Attention ("what we look at together")
 
 This is the starting point for a NEW branch. Read this + the memory files; the code below already

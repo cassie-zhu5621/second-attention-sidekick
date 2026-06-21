@@ -15,10 +15,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib.colors import LinearSegmentedColormap
+
+# heatmap colormap from the color card, LIGHTENED so dark text stays readable everywhere:
+# light red (bad) -> light yellow-green -> light green (good). No dark end.
+CARD_RG = LinearSegmentedColormap.from_list(
+    "card_rg", ["#EBB0B0", "#EBEB90", "#BCDD72", "#79B03C"])   # light red -> light yel-grn -> green -> mid-deep grn
 
 # ---- shared style ----------------------------------------------------------
-BLUE, ORANGE, GREEN, RED, GRAY = "#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8C8C8C"
-PURPLE, INK, PAPER = "#8172B3", "#222222", "#FFFFFF"
+# palette from the Adobe color card (green #A1CC48 + red #D95B5B), each softened ~20% toward white
+BLUE, ORANGE, GREEN, RED, GRAY = "#4C72B0", "#DD8452", "#B4D66D", "#E17C7C", "#8C8C8C"
+PURPLE, INK, PAPER = "#8172B3", "#262626", "#FFFFFF"
 plt.rcParams.update({
     "figure.facecolor": PAPER, "axes.facecolor": PAPER, "savefig.facecolor": PAPER,
     "font.family": "DejaVu Sans", "axes.edgecolor": "#CCCCCC", "axes.linewidth": 0.8,
@@ -30,6 +37,10 @@ DPI = 200
 
 SCENARIOS = ["assembly", "guest", "solo-work", "lunch", "demo-day",
              "pair-prog", "entrance", "fragile", "rehearsal", "quiet"]
+# display names for the x-axis (data keys above stay stable; these just read closer to the
+# reworded scenario texts: pair-prog→collab, fragile→prototype, rehearsal→presentation, …)
+LABELS = ["assembly", "guest", "solo", "lunch", "demo",
+          "collab", "entrance", "prototype", "presentation", "quiet"]
 
 
 # ---- data ------------------------------------------------------------------
@@ -177,13 +188,13 @@ def fig_agreement(by, out):
     fig, axes = plt.subplots(1, 2, figsize=(12.8, 4.8), sharey=True)
     x = range(len(SCENARIOS))
     for ax, T in zip(axes, (0.0, 0.7)):
-        for off, (g, col) in zip((-0.2, 0.2), (("restricted", BLUE), ("free", ORANGE))):
+        for off, (g, col) in zip((-0.2, 0.2), (("restricted", GREEN), ("free", RED))):
             ag = [cond_stats(by[(g, s, T)])[1] for s in SCENARIOS]
             jc = [cond_stats(by[(g, s, T)])[2] for s in SCENARIOS]
             ax.bar([i + off for i in x], ag, width=0.38, color=col, label=f"{g} (agreement)")
             ax.plot([i + off for i in x], jc, "o", color=col, mec=INK, mew=0.6, ms=5,
                     label=f"{g} (Jaccard)" if T == 0.0 else None)
-        ax.set_xticks(list(x)); ax.set_xticklabels(SCENARIOS, rotation=35, ha="right")
+        ax.set_xticks(list(x)); ax.set_xticklabels(LABELS, rotation=35, ha="right")
         ax.set_ylim(0, 1.05); ax.set_title(f"temperature {T}")
         ax.axhline(0.6, color=GRAY, lw=1, ls="--")
     axes[0].set_ylabel("modal agreement (bars) / mean Jaccard (dots)")
@@ -253,7 +264,7 @@ def fig_ops(by, out):
               ("any1", "#B7C6DE", '"any" 1 id — notation only (≡ all)'))
     for off, (key, col, lab) in zip((-0.3, -0.1, 0.1, 0.3), series):
         ax.bar([i + off for i in x], ops[key], 0.19, color=col, label=lab)
-    ax.set_xticks(list(x)); ax.set_xticklabels(SCENARIOS, rotation=35, ha="right")
+    ax.set_xticks(list(x)); ax.set_xticklabels(LABELS, rotation=35, ha="right")
     ax.set_ylim(0, 10.5)
     ax.axhline(10, color=GRAY, lw=1, ls="--")
     ax.set_ylabel("valid runs using the operator (max 10)")
@@ -291,7 +302,7 @@ def fig_missing(runs, by, out):
         rates.append(n / len(ok) if ok else 0)
     cols = [RED if v > 0.5 else ORANGE if v > 0 else GREEN for v in rates]
     ax1.bar(range(len(SCENARIOS)), rates, color=cols)
-    ax1.set_xticks(range(len(SCENARIOS))); ax1.set_xticklabels(SCENARIOS, rotation=35, ha="right")
+    ax1.set_xticks(range(len(SCENARIOS))); ax1.set_xticklabels(LABELS, rotation=35, ha="right")
     ax1.set_ylim(0, 1.05); ax1.set_ylabel('runs naming a "missing" relation')
     ax1.set_title("Where the vocabulary falls short")
 
@@ -337,7 +348,7 @@ def fig_v1v2(jsonl_v1, jsonl_v2, out):
             color=GRAY, label="vocabulary v1")
     ax1.bar([i + 0.2 for i in x], [miss_rate(by2, s) for s in SCENARIOS], 0.38,
             color=GREEN, label="vocabulary v2 (+row 11)")
-    ax1.set_xticks(list(x)); ax1.set_xticklabels(SCENARIOS, rotation=35, ha="right")
+    ax1.set_xticks(list(x)); ax1.set_xticklabels(LABELS, rotation=35, ha="right")
     ax1.set_ylim(0, 1.05); ax1.set_ylabel('runs naming a "missing" relation')
     ax1.set_title("Coverage probe, before → after")
     ax1.legend()
@@ -346,7 +357,7 @@ def fig_v1v2(jsonl_v1, jsonl_v2, out):
                  arrowprops=dict(arrowstyle="->", color=RED))
 
     ax2.bar(x, [adopt11(by2, s) for s in SCENARIOS], 0.55, color=BLUE)
-    ax2.set_xticks(list(x)); ax2.set_xticklabels(SCENARIOS, rotation=35, ha="right")
+    ax2.set_xticks(list(x)); ax2.set_xticklabels(LABELS, rotation=35, ha="right")
     ax2.set_ylim(0, 1.05); ax2.set_ylabel("valid runs using row 11")
     ax2.set_title("Row-11 adoption — used exactly where it belongs")
     v1v = sum(1 for r in runs1 if r["violations"]) / len(runs1)
@@ -392,22 +403,22 @@ def fig_translatability(jsonl, out):
     data = np.array(data)
 
     fig, ax = plt.subplots(figsize=(9.6, 6.4))
-    im = ax.imshow(data, cmap="RdYlGn", vmin=0.3, vmax=1.0, aspect="auto")
+    im = ax.imshow(data, cmap=CARD_RG, vmin=0.5, vmax=1.0, aspect="auto")  # vmin 0.5 -> spread 70-100% across the greens
     ax.set_xticks(range(len(cols))); ax.set_xticklabels(cols, fontsize=10)
-    ax.set_yticks(range(len(SCENARIOS))); ax.set_yticklabels(SCENARIOS, fontsize=11)
+    ax.set_yticks(range(len(SCENARIOS))); ax.set_yticklabels(LABELS, fontsize=11)
     for i in range(len(SCENARIOS)):
         for j in range(len(cols)):
             v = data[i, j]
             txt = f"{v:.0%}" + ("  ✓" if j == 3 and v >= 0.7 else "")
             ax.text(j, i, txt, ha="center", va="center", fontsize=10.5,
                     weight="bold" if j == 3 else "normal",
-                    color=INK if v > 0.55 else PAPER)
+                    color=INK)                       # all cells light now -> dark text everywhere
     ax.set_xticks([x - 0.5 for x in range(1, len(cols))], minor=True)
     ax.set_yticks([y - 0.5 for y in range(1, len(SCENARIOS))], minor=True)
     ax.grid(which="minor", color=PAPER, lw=2)
     ax.tick_params(which="both", length=0)
     ax.set_title("Context → watch-spec translation is reliable across the scenario space\n"
-                 "(vocabulary v2 · the shipping grammar (free) · 2 temperatures × k=5 per scenario)",
+                 "(vocabulary v2.1 · the shipping grammar (free) · 2 temperatures × k=5 per scenario)",
                  fontsize=13)
     fig.text(0.5, 0.01, "scenarios are a stratified sample over people-count × activity × "
              "robot-role × instruction-style — to be re-validated on elicited (v3) scenarios",

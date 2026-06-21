@@ -30,12 +30,10 @@ config_gate/                               # the live system (everything runs fr
   # --- hardware adapters ---
   rig.py             # GimbalRig: move_to() serial + get_frame() M5 MJPEG; calibration; nod()
   cam_test.py        # camera-only stream test;  rig_moves.py  # named motion test
-  # --- previous-generation demos (still runnable; deps of attention_robot) ---
-  attention_demo.py  # fixed-cam relations->gate->VLM (also: frame_source / publish helpers)
-  attention_robot.py # rig: scan -> confirm -> STOP & WATCH at pose -> resume
-  robot_demo.py      # OLD generic structural gate on the rig (+ orient_target helper)
-  web_demo.py        # old web feed (taste box); config_surprise.py / viz.py: its gate + overlay
-  run_perception.py  # batch detector A/B on saved frames
+  # --- shared / legacy modules still imported by attention_system ---
+  attention_demo.py  # fixed-cam relations->gate->VLM; also frame_source / publish helpers reused by the system
+  web_demo.py        # web feed (taste box); config_surprise.py / viz.py: gate + overlay helpers
+  # (removed in v1 cleanup: attention_robot.py, robot_demo.py, run_perception.py — superseded by attention_system --rig)
   # --- docs/ ---
   docs/SYSTEM_MAP.md           # THIS file
   docs/SETUP_AND_COMMANDS.md   # fresh-machine setup + every test command
@@ -86,8 +84,8 @@ cd second-attention-sidekick/config_gate
 python cam_test.py  --camera http://<ip>/                                  # camera only
 python rig_moves.py --camera http://<ip>/ --port /dev/cu.usbmodem101       # rig motion
 export ANTHROPIC_API_KEY=sk-...
-python robot_demo.py --real --serve --no-save                              # full demo (test, no disk)
-python run_perception.py --images <folder> --detector yolo|gdino|yoloworld # offline detector A/B
+python attention_system.py --serve --save --plan-frame --camera 0          # full system (static)
+python attention_system.py --serve --save --rig --port /dev/cu.usbmodem101 # full system (pan-tilt robot)
 ```
 Deps: ultralytics (yolo/-world), transformers (gdino, depth), anthropic (VLM), pyserial, opencv,
 requests, mediapipe (gaze branch).

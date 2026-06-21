@@ -31,7 +31,7 @@ import numpy as np
 from perceive import Detection
 from gaze import (HeadPoseEstimator, GazeRay, arm_ray_from_points, gazing_at,
                   pointing_at, joint_attention, eye_contact, ray_hits_box, _mp_vision,
-                  _ensure_model)
+                  _ensure_model, pose_head_ray)
 
 Box = Tuple[float, float, float, float]
 
@@ -54,6 +54,7 @@ class PersonPose:
     pid: int                                   # stable id from the tracker
     pts: Dict[int, Tuple[float, float]]        # landmark -> px
     vis: Dict[int, float]
+    raw: Optional[list] = None                 # all 33 landmarks [(x,y,vis)] (skeleton draw + head-ray fallback)
 
     def has(self, *ids, min_vis=0.5):
         return all(i in self.pts and self.vis.get(i, 0) >= min_vis for i in ids)
@@ -83,14 +84,18 @@ class PersonPose:
 class PoseEstimator:
     """frame -> List[PersonPose] (ids NOT yet assigned; the tracker does that)."""
 
-    def __init__(self, max_people: int = 4, min_conf: float = 0.5):
+    def __init__(self, max_people: int = 4, min_conf: float = 0.5, smooth: float = 0.5):
         mp, mp_tasks, vision = _mp_vision()
         self._mp = mp
         self._lm = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
             base_options=mp_tasks.BaseOptions(model_asset_path=_ensure_model("pose_landmarker_lite.task")),
             running_mode=vision.RunningMode.VIDEO, num_poses=max_people,
-            min_pose_detection_confidence=min_conf, min_tracking_confidence=min_conf))
+            min_pose_detection_confidence=min_conf,
+            min_pose_presence_confidence=0.3,    # lower -> person stops flickering OUT when still
+            min_tracking_confidence=0.3))        # lower -> keeps the track alive between detections
         self._ts = 0
+        self.smooth = smooth                     # EMA factor (lower = smoother, more lag)
+        self._prev: List[list] = []              # previous smoothed full-landmark arrays
 
     def estimate(self, frame_bgr) -> List[PersonPose]:
         import cv2
@@ -99,11 +104,23 @@ class PoseEstimator:
                              data=cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
         self._ts += 33
         res = self._lm.detect_for_video(img, self._ts)
+        raw_all = [[(lm.x * W, lm.y * H, getattr(lm, "visibility", 1.0) or 1.0) for lm in person]
+                   for person in (res.pose_landmarks or [])]
+        # TEMPORAL SMOOTHING (EMA, matched by person index) — stops a still person's joints jittering.
+        a = self.smooth
+        sm = []
+        for i, pose in enumerate(raw_all):
+            if i < len(self._prev) and len(self._prev[i]) == len(pose):
+                prev = self._prev[i]
+                pose = [(a * x + (1 - a) * px, a * y + (1 - a) * py, v)
+                        for (x, y, v), (px, py, _) in zip(pose, prev)]
+            sm.append(pose)
+        self._prev = sm
         out = []
-        for person in (res.pose_landmarks or []):
-            pts = {i: (person[i].x * W, person[i].y * H) for i in _NEEDED}
-            vis = {i: (getattr(person[i], "visibility", 1.0) or 1.0) for i in _NEEDED}
-            out.append(PersonPose(pid=-1, pts=pts, vis=vis))
+        for raw in sm:
+            pts = {i: (raw[i][0], raw[i][1]) for i in _NEEDED}
+            vis = {i: raw[i][2] for i in _NEEDED}
+            out.append(PersonPose(pid=-1, pts=pts, vis=vis, raw=raw))
         return out
 
     def close(self):
@@ -208,6 +225,20 @@ class RelationEngine:
         people = self.poses.estimate(frame_bgr)
         if any(p.pid < 0 for p in people):        # backend without ids (mediapipe) -> our tracker
             people = self.tracker.assign(people, (W, H), t)
+        # DISTANCE FALLBACK: FaceMesh drops small/far faces; add a coarse Pose head ray for any
+        # person the FaceMesh didn't cover (Pose detects heads much farther). Near faces keep the
+        # precise FaceMesh ray. Coarse rays have no 3D, so eye_contact (row 3) auto-skips them.
+        for p in people:
+            if p.raw is None:
+                continue
+            hr = pose_head_ray(p.raw)
+            if hr is None:
+                continue
+            thr = max(50.0, 0.5 * (hr.face_box[2] - hr.face_box[0]))
+            if any((not r.coarse) and math.hypot(r.origin[0] - hr.origin[0],
+                    r.origin[1] - hr.origin[1]) < thr for r in rays):
+                continue
+            rays.append(hr)
         dets = self.det.detect(frame_bgr) if self.det else []
         return self.evaluate(rays, people, dets, (W, H), t)
 

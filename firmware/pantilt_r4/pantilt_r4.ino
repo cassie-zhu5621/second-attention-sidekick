@@ -15,6 +15,11 @@
  * Wiring: PAN -> D9, TILT -> D10, servo V+ -> external 5V, GND shared, R4 on USB.
  *         PASSIVE BUZZER: + -> D8, - -> GND.  (passive = needs tone(); a chirp is
  *         the audible half of the 'noticed' cue, synced with the nod by the laptop.)
+ *         RED LED: long leg (anode +) -> 220-330 ohm resistor -> D6 (PWM);
+ *                  short leg (cathode -) -> GND.
+ *
+ * LED behaviour (no laptop change needed): SEARCHING -> slow calm breathing; on "beep"
+ * (the laptop's 'found/nod' moment) -> a sudden fast flutter, then back to breathing.
  */
 
 #include <Servo.h>
@@ -22,6 +27,8 @@
 const int PAN_PIN  = 9;
 const int TILT_PIN = 10;
 const int BUZZ_PIN = 8;
+const int LED_PIN  = 6;                  // red LED (PWM) — anode->220R->D6, cathode->GND
+const unsigned long BREATH_MS = 3000;    // breathing period while searching
 
 const int PAN_CENTER  = 90;
 const int TILT_CENTER = 90;
@@ -63,6 +70,19 @@ void chirp() {                      // 'noticed': two short rising notes (friend
   noTone(BUZZ_PIN);
 }
 
+void breathe() {                    // SEARCHING: slow calm pulse (smooth sine fade, PWM)
+  unsigned long phase = millis() % BREATH_MS;
+  int b = (int)(127.5 * (1.0 - cos(TWO_PI * phase / (float)BREATH_MS)));
+  analogWrite(LED_PIN, b);
+}
+
+void ledBurst() {                   // FOUND!: a sudden excited fast flutter, then resume breathing
+  for (int i = 0; i < 8; i++) {
+    analogWrite(LED_PIN, 255); delay(45);
+    analogWrite(LED_PIN, 0);   delay(45);
+  }
+}
+
 void easeTo(int tp, int tt) {
   tp = clampi(tp, PAN_MIN, PAN_MAX);
   tt = clampi(tt, TILT_MIN, TILT_MAX);
@@ -72,6 +92,7 @@ void easeTo(int tp, int tt) {
     if (curTilt < tt) curTilt++; else if (curTilt > tt) curTilt--;
     pan.write(curPan);
     tilt.write(curTilt);
+    breathe();                   // keep the LED breathing during the glide
     delay(STEP_MS);
   }
   lastCmd = millis();
@@ -79,6 +100,7 @@ void easeTo(int tp, int tt) {
 
 void setup() {
   Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
   attachServos();              // center on boot
   lastCmd = millis();
   Serial.println("pantilt ready — 'pan,tilt' to move, 'off' to relax; auto-relax when idle");
@@ -91,6 +113,7 @@ void loop() {
     if (line == "off" || line == "relax") {
       relax();
     } else if (line == "beep") {
+      ledBurst();                // FOUND: sudden fast flutter (synced with the nod)
       chirp();
       lastCmd = millis();
       Serial.println("beep");
@@ -109,4 +132,6 @@ void loop() {
   if (live && millis() - lastCmd > IDLE_MS) {
     relax();                   // no commands for a while -> stop buzzing/heating
   }
+
+  breathe();                   // SEARCHING/idle: the red LED breathes (calm 'I'm watching')
 }

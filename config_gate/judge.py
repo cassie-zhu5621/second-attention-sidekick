@@ -109,7 +109,7 @@ def _offline(jpeg: bytes, rel: str, taste: ReportabilityTaste) -> dict:
     return {"axes": scores, "note": f"[offline] {rel[:48]}" or "a quiet moment"}
 
 
-def _prompt(rel: str, taste: ReportabilityTaste, confirm: str = "") -> str:
+def _prompt(rel: str, taste: ReportabilityTaste, confirm: str = "", story: str = "") -> str:
     lines = [
         "You are the noticing companion's judgment brain for a camera placed in a shared space.",
         "This moment already passed a novelty gate (something structurally changed), so do NOT",
@@ -127,6 +127,11 @@ def _prompt(rel: str, taste: ReportabilityTaste, confirm: str = "") -> str:
                      " The geometry is a cheap 2D estimate and can be fooled by depth (a ray"
                      " passing IN FRONT of an object is not attention to it). If the image does"
                      ' not support it, set "confirmed": false and say why in the note.')
+    if story:
+        lines.append(f"\nThis is a short STORY that unfolded over a few seconds (the image is its"
+                     f" comic strip, left-to-right). The grounded sequence of what the system actually"
+                     f" DETECTED, in order: {story}. Write the note as a brief, faithful recounting of"
+                     f" what happened ACROSS the story — the sequence, not a single frame.")
     js = '{"axes": {"people":0-1,"relevance":0-1,"consequence":0-1,"continuity":0-1}, '
     js += '"confirmed": true|false, ' if confirm else ''
     js += '"note": "<one field note, <=16 words>"}'
@@ -135,14 +140,16 @@ def _prompt(rel: str, taste: ReportabilityTaste, confirm: str = "") -> str:
 
 
 def judge(jpeg: Optional[bytes], graph, taste: ReportabilityTaste,
-          delta_added=None, model: str = MODEL, confirm: str = "") -> dict:
+          delta_added=None, model: str = MODEL, confirm: str = "", story: str = "") -> dict:
     """Judge one gated moment. Returns {worth, why, note, axes, confirmed}.
     `confirm`: optional relation claim (e.g. "a person gazing at the cup") — the VLM first
     VERIFIES it against the image (the precision half of the gate→VLM split for the
     designed-relation branch); unconfirmed moments come back with worth=0."""
     rel = relations_text(graph, delta_added) if graph is not None else ""
     if os.environ.get("SECONDATTN_OFFLINE") == "1" or jpeg is None:
-        out = _offline(jpeg, rel, taste)
+        out = _offline(jpeg, story or rel, taste)       # offline: narrate from the trace if present
+        if story:
+            out["note"] = f"[offline] {story[:64]}"
         out["confirmed"] = True
     else:
         import anthropic
@@ -152,7 +159,7 @@ def judge(jpeg: Optional[bytes], graph, taste: ReportabilityTaste,
             model=model, max_tokens=200,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                {"type": "text", "text": _prompt(rel, taste, confirm)}]}])
+                {"type": "text", "text": _prompt(rel, taste, confirm, story)}]}])
         text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
         try:
             s, e = text.index("{"), text.rindex("}") + 1
